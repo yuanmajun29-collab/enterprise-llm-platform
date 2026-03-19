@@ -1,6 +1,6 @@
 # 企业大模型服务平台 — 云端部署实施文档
 
-> 团队：cqfz-ai-platform  |  版本：v1.0  |  更新日期：2026-03-19
+> 团队：cqfz-ai-platform  |  版本：v1.1  |  更新日期：2026-03-19
 
 ---
 
@@ -14,7 +14,7 @@
                                │
                         ┌──────┴──────┐
                         │  Kong 网关   │  :8443 API 统一入口
-                        │  (JWT + 限流)│
+                        │  (路由 + 限流)│
                         └──┬─────┬────┘
                            │     │
               ┌────────────┘     └────────────┐
@@ -44,7 +44,7 @@
 | 服务 | 容器名 | 镜像 | 端口 | 说明 |
 |------|--------|------|------|------|
 | API Server | api-server | 自建 | 8080 | 业务逻辑、认证、用户管理 |
-| Kong 网关 | kong-gateway | kong/kong-gateway:3.5.0.0 | 8443/8444/8001 | API 网关、JWT 验证、限流 |
+| Kong 网关 | kong-gateway | kong/kong-gateway:3.5.0.0 | 8443/8444/8001 | API 路由、限流（认证由 API Server 处理） |
 | vLLM 推理 | vllm-inference | vllm/vllm-openai:latest | 8000 | 大模型推理引擎 |
 | PostgreSQL | postgres | postgres:15-alpine | 5432 | 业务数据库 |
 | Kong DB | kong-database | postgres:15-alpine | — | Kong 元数据库 |
@@ -307,17 +307,57 @@ docker compose ps
 
 ---
 
-## 六、Kong 网关路由
+## 六、网关与认证架构
 
-| 路由 | 路径 | 目标 | 插件 |
-|------|------|------|------|
-| llm-chat-completions | /v1/chat/completions | vLLM | JWT + Rate-limiting |
-| llm-completions | /v1/completions | vLLM | JWT + Rate-limiting |
-| llm-models | /v1/models | vLLM | JWT |
-| llm-embeddings | /v1/embeddings | vLLM | JWT + Rate-limiting |
-| api-server | /api/* | API Server | JWT + Rate-limiting |
+### 6.1 设计原则
+
+系统采用**网关路由 + 应用层认证**的分离架构：
+
+```
+IDE 插件
+    │
+    ▼ Authorization: Bearer <token>
+┌──────────────────────────────────────────┐
+│  Kong 网关 (:8443)                        │
+│  职责：路由分发 + Redis 限流              │
+│  不做 JWT 验证，透传 Authorization header │
+└──────┬──────────────────────┬────────────┘
+       │                      │
+       ▼                      ▼
+┌──────────────┐      ┌──────────────┐
+│ API Server   │      │ vLLM 推理服务  │
+│ (:8080)      │      │ (:8000)      │
+│ JWT 验证     │      │              │
+│ 用户管理     │      │              │
+│ 配额/审计    │      │              │
+└──────────────┘      └──────────────┘
+```
+
+- **Kong**：纯路由网关，负责限流（Redis 策略）和请求分发，将 `Authorization` header 透传给后端
+- **API Server**：负责所有认证逻辑（JWT 验证、API Key 验证、Keycloak OAuth）
+- **vLLM**：纯推理引擎，不处理认证（生产环境如需 vLLM 层认证可后续在 Kong 添加）
+
+### 6.2 路由表
+
+| 路由 | 路径 | 目标服务 | 插件 |
+|------|------|---------|------|
+| llm-chat-completions | POST /v1/chat/completions | vLLM | Rate-limiting |
+| llm-completions | POST /v1/completions | vLLM | Rate-limiting |
+| llm-models | GET /v1/models | vLLM | — |
+| llm-embeddings | POST /v1/embeddings | vLLM | Rate-limiting |
+| api-server | /api/* | API Server | Rate-limiting |
 | keycloak-proxy | /auth/* | Keycloak | — |
-| health-check | /health | vLLM | — |
+| health-check | GET /health | vLLM | — |
+
+### 6.3 限流策略
+
+基于 Redis 的三级限流：
+
+| 级别 | 配置 | 说明 |
+|------|------|------|
+| 每分钟 | 60 次 | 防止单用户短时刷接口 |
+| 每小时 | 1000 次 | 控制单用户持续使用 |
+| 每天 | 10000 次 | 全天用量上限 |
 
 ---
 
@@ -416,21 +456,95 @@ curl http://localhost:8443/api/usage/stats?days=30 \
 
 ## 十、IDE 插件
 
-### VSCode
+### 10.1 员工使用流程
+
+```
+1. 安装插件（VSCode 或 JetBrains）
+2. 配置 API 地址 → https://api.yourcompany.com（Kong 入口）
+3. 登录（用户名+密码 或 Keycloak OAuth）
+4. 开始使用：
+   - AI 对话（多轮聊天，流式输出）
+   - 代码补全（输入时自动触发，500ms 防抖）
+   - 选中代码 → 右键 → 解释/重构/测试/Bug检测/优化
+```
+
+### 10.2 插件调用链路
+
+```
+VSCode 插件
+  ├── AI 对话：aiClient → Kong(:8443) → vLLM(:8000) /v1/chat/completions
+  ├── 代码补全：aiClient → Kong(:8443) → vLLM(:8000) /v1/completions
+  ├── 登录认证：authClient → Kong(:8443) → API Server(:8080) /api/auth/login
+  ├── Keycloak 登录：authClient → Kong(:8443) → API Server(:8080) /api/auth/keycloak/login
+  ├── 使用统计：Kong(:8443) → API Server(:8080) /api/usage/*
+  └── API Key：Kong(:8443) → API Server(:8080) /api/apikeys/*
+```
+
+> 所有请求均通过 Kong 网关 (:8443) 统一入口，Kong 负责限流后透传给后端服务。
+> 认证 token 在 API Server 层验证，vLLM 推理服务不做认证。
+
+### 10.3 VSCode 插件
 
 ```bash
 ./scripts/build-vscode.sh
 code --install-extension dist/enterprise-llm-assistant-*.vsix
 ```
 
-快捷键：`Ctrl+Shift+L` 登录 / `Ctrl+Shift+C` 聊天 / `Ctrl+Shift+E` 解释代码
+功能清单：
+- **AI 对话**：侧边栏聊天面板，支持多轮对话、流式输出、Markdown 渲染
+- **代码补全**：内联补全（ghost text），500ms 防抖，支持所有语言
+- **代码辅助**：选中代码后右键菜单
+  - 解释代码（Ctrl+Shift+E）
+  - 重构代码（Ctrl+Shift+R）
+  - 生成单元测试（Ctrl+Shift+T）
+  - 查找 Bug（Ctrl+Shift+B）
+  - 优化性能（Ctrl+Shift+O）
+- **状态栏**：显示连接状态（已连接/未连接）
 
-### JetBrains
+配置项（Settings → 搜索 "LLM"）：
+
+| 配置 | 默认值 | 说明 |
+|------|--------|------|
+| llm-assistant.apiUrl | http://localhost:8443 | API 地址（指向 Kong 网关） |
+| llm-assistant.authMode | token | 认证模式（token / keycloak） |
+| llm-assistant.defaultModel | Qwen-72B-Chat | 默认模型 |
+| llm-assistant.maxTokens | 2000 | 最大 Token 数 |
+| llm-assistant.temperature | 0.7 | 温度参数 |
+| llm-assistant.enableStream | true | 启用流式输出 |
+| llm-assistant.enableAutocomplete | true | 启用自动补全 |
+| llm-assistant.autocompleteDebounce | 500 | 补全防抖时间（ms） |
+| llm-assistant.systemPrompt | （内置专业提示词） | 系统提示词 |
+
+快捷键：
+
+| 快捷键 | 功能 |
+|--------|------|
+| Ctrl+Shift+L | 登录 |
+| Ctrl+Shift+C | 打开 AI 对话 |
+| Ctrl+Shift+E | 解释选中代码 |
+| Ctrl+Shift+R | 重构选中代码 |
+| Ctrl+Shift+T | 生成单元测试 |
+| Ctrl+Shift+B | 查找 Bug |
+| Ctrl+Shift+O | 优化代码 |
+
+### 10.4 JetBrains 插件
 
 ```bash
+# 构建（需要 JDK 17+）
 ./scripts/build-jetbrains.sh
-# Settings → Plugins → Install from Disk → 选择 dist/*.zip
+
+# 安装：Settings → Plugins → Install Plugin from Disk → 选择 dist/*.zip
 ```
+
+功能清单：
+- **AI 聊天面板**：工具窗口，支持消息历史、模型选择、Token 计数显示
+- **代码补全**：AICompletionContributor，自动触发
+- **代码辅助 Actions**（右键菜单 → AI 助手）：
+  - 解释代码、重构代码、生成测试、查找 Bug、优化性能
+  - 结果支持复制或直接替换选中代码
+- **设置界面**：API URL、Token、默认模型、温度滑块等
+
+构建依赖：Gradle 8.7 + JDK 17，使用 IntelliJ Platform Plugin，**零外部运行时依赖**（HTTP 使用 JDK 内置 HttpURLConnection）。
 
 ---
 
@@ -571,8 +685,14 @@ docker exec vllm-inference ls -lh /models/
 ### 认证失败
 
 ```bash
+# 检查 Keycloak 状态
 curl http://localhost:8080/health/ready
+
+# 检查 JWT Secret 是否一致（docker/.env 和 api-server/.env）
 grep JWT_SECRET docker/.env api-server/.env
+
+# 检查 API Server 日志
+cd docker && docker compose logs api-server --tail=50
 ```
 
 ---
