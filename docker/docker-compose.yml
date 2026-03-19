@@ -1,0 +1,262 @@
+services:
+  # ========================================
+  # 推理服务层
+  # ========================================
+  vllm-inference:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-inference
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../models:/models
+      - ../logs:/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - MODEL_NAME=/models/Qwen-72B-Chat
+      - VLLM_TENSOR_PARALLEL_SIZE=4
+      - VLLM_GPU_MEMORY_UTILIZATION=0.95
+      - VLLM_MAX_MODEL_LEN=8192
+      - VLLM_DTYPE=bfloat16
+    command: >
+      --model /models/Qwen-72B-Chat
+      --tensor-parallel-size 4
+      --gpu-memory-utilization 0.95
+      --max-model-len 8192
+      --dtype bfloat16
+      --host 0.0.0.0
+      --port 8000
+      --trust-remote-code
+    networks:
+      - llm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # ========================================
+  # API 网关层
+  # ========================================
+  kong:
+    image: kong/kong-gateway:3.5.0.0
+    container_name: kong-gateway
+    ports:
+      - "8443:8443"
+      - "8444:8444"
+      - "8001:8001"
+    environment:
+      - KONG_DATABASE=postgres
+      - KONG_PG_HOST=kong-database
+      - KONG_PG_PORT=5432
+      - KONG_PG_USER=kong
+      - KONG_PG_PASSWORD=${KONG_DB_PASSWORD:-kong_password}
+      - KONG_PG_DATABASE=kong
+      - KONG_ADMIN_ACCESS_LOG=/dev/stdout
+      - KONG_ADMIN_ERROR_LOG=/dev/stderr
+      - KONG_PROXY_ACCESS_LOG=/dev/stdout
+      - KONG_PROXY_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_ADMIN_GUI_URL=http://localhost:8002
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+    networks:
+      - llm-network
+    depends_on:
+      - kong-database
+    restart: unless-stopped
+
+  kong-database:
+    image: postgres:15-alpine
+    container_name: kong-database
+    environment:
+      - POSTGRES_USER=kong
+      - POSTGRES_PASSWORD=${KONG_DB_PASSWORD:-kong_password}
+      - POSTGRES_DB=kong
+    volumes:
+      - kong-data:/var/lib/postgresql/data
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+  # ========================================
+  # 身份认证服务
+  # ========================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: keycloak
+    ports:
+      - "8080:8080"
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-ChangeMe123!}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://keycloak-db/keycloak
+      - KC_DB_USERNAME=keycloak
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak_password}
+      - KC_HOSTNAME=localhost
+      - KC_HOSTNAME_PORT=8080
+      - KC_HOSTNAME_STRICT=false
+      - KC_HOSTNAME_STRICT_HTTPS=false
+      - KC_PROXY=edge
+    command: start-dev
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      - llm-network
+    depends_on:
+      - keycloak-db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  keycloak-db:
+    image: postgres:15-alpine
+    container_name: keycloak-db
+    environment:
+      - POSTGRES_USER=keycloak
+      - POSTGRES_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak_password}
+      - POSTGRES_DB=keycloak
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+  # ========================================
+  # Redis 缓存
+  # ========================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - llm-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+
+  # ========================================
+  # 监控服务
+  # ========================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - llm-network
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    networks:
+      - llm-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ========================================
+  # 日志服务
+  # ========================================
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    networks:
+      - llm-network
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - ../logs:/app/logs:ro
+    networks:
+      - llm-network
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+
+  # ========================================
+  # 应用数据库
+  # ========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=llm_platform
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-llm_platform_password}
+      - POSTGRES_DB=llm_platform
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - llm-network
+    restart: unless-stopped
+
+networks:
+  llm-network:
+    driver: bridge
+    name: llm-network
+
+volumes:
+  kong-data:
+    driver: local
+  keycloak-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  loki-data:
+    driver: local
+  postgres-data:
+    driver: local

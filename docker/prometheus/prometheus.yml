@@ -1,0 +1,65 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'enterprise-llm-platform'
+    environment: 'production'
+
+# 告警规则文件
+rule_files:
+  - "alerts.yml"
+
+# 抓取配置
+scrape_configs:
+  # Prometheus 自监控
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Kong Gateway 指标
+  - job_name: 'kong'
+    static_configs:
+      - targets: ['kong:8001']
+    metrics_path: /metrics
+
+  # vLLM 推理服务指标
+  - job_name: 'vllm-inference'
+    static_configs:
+      - targets: ['vllm-inference:8000']
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'vllm-1'
+
+  # Keycloak 指标
+  - job_name: 'keycloak'
+    static_configs:
+      - targets: ['keycloak:8080']
+    metrics_path: /metrics
+
+  # Redis 指标
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # PostgreSQL 指标
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  # cAdvisor 容器监控
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Node Exporter 系统监控
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # 平台业务指标
+  - job_name: 'llm-platform'
+    static_configs:
+      - targets: ['api-gateway:9090']
+    metrics_path: /api/metrics

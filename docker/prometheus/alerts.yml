@@ -1,0 +1,165 @@
+groups:
+  - name: llm_platform_alerts
+    interval: 30s
+    rules:
+      # ========================================
+      # 服务可用性告警
+      # ========================================
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "服务 {{ $labels.job }} {{ $labels.instance }} 不可用"
+          description: "服务已宕机超过1分钟"
+
+      - alert: HighErrorRate
+        expr: rate(llm_requests_errors_total[5m]) / rate(llm_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "API 错误率超过 5%"
+          description: "当前错误率: {{ $value | humanizePercentage }}"
+
+      - alert: VeryHighErrorRate
+        expr: rate(llm_requests_errors_total[5m]) / rate(llm_requests_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "API 错误率超过 10%"
+          description: "当前错误率: {{ $value | humanizePercentage }}"
+
+      # ========================================
+      # 性能告警
+      # ========================================
+      - alert: HighLatency
+        expr: histogram_quantile(0.99, llm_request_duration_seconds) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "P99 延迟超过 5 秒"
+          description: "当前 P99 延迟: {{ $value }}s"
+
+      - alert: VeryHighLatency
+        expr: histogram_quantile(0.99, llm_request_duration_seconds) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: performance
+        annotations:
+          summary: "P99 延迟超过 10 秒"
+          description: "当前 P99 延迟: {{ $value }}s"
+
+      - alert: HighQueueLength
+        expr: llm_queue_length > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "请求队列过长"
+          description: "当前队列长度: {{ $value }}"
+
+      # ========================================
+      # 资源使用告警
+      # ========================================
+      - alert: HighGPUUsage
+        expr: nvidia_gpu_utilization > 95
+        for: 10m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "GPU 使用率过高"
+          description: "GPU {{ $labels.gpu }} 使用率: {{ $value }}%"
+
+      - alert: HighGPUMemoryUsage
+        expr: (nvidia_gpu_memory_used / nvidia_gpu_memory_total) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+          component: resource
+        annotations:
+          summary: "GPU 显存使用率过高"
+          description: "显存使用率: {{ $value | humanizePercentage }}"
+
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "CPU 使用率过高"
+          description: "CPU 使用率: {{ $value }}%"
+
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes / node_memory_MemTotal_bytes > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "内存使用率过高"
+          description: "内存使用率: {{ $value | humanizePercentage }}"
+
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: resource
+        annotations:
+          summary: "磁盘空间不足"
+          description: "挂载点 {{ $labels.mountpoint }} 剩余空间: {{ $value | humanizePercentage }}"
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: resource
+        annotations:
+          summary: "磁盘空间严重不足"
+          description: "挂载点 {{ $labels.mountpoint }} 剩余空间: {{ $value | humanizePercentage }}"
+
+      # ========================================
+      # 业务告警
+      # ========================================
+      - alert: LowRequestRate
+        expr: rate(llm_requests_total[5m]) < 1
+        for: 15m
+        labels:
+          severity: info
+          component: business
+        annotations:
+          summary: "请求率过低"
+          description: "当前请求率: {{ $value }} req/s"
+
+      - alert: UserQuotaExceeded
+        expr: llm_user_tokens_consumed_today > llm_user_tokens_quota
+        for: 1m
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "用户 Token 配额已用尽"
+          description: "用户 {{ $labels.user_id }} 已消耗 {{ $value }} tokens"
+
+      - alert: ModelLoadingFailure
+        expr: llm_model_load_errors_total > 0
+        for: 1m
+        labels:
+          severity: critical
+          component: model
+        annotations:
+          summary: "模型加载失败"
+          description: "模型 {{ $labels.model_name }} 加载失败"

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin>
+    <id>com.company.aiassistant</id>
+    <name>Enterprise AI Assistant</name>
+    <vendor email="support@company.com" url="https://www.company.com">Company</vendor>
+
+    <description><![CDATA[
+        <p>企业大模型助手 - 支持 IntelliJ IDEA, PyCharm, WebStorm, GoLand 等 JetBrains IDE</p>
+        <ul>
+            <li>AI 对话面板</li>
+            <li>代码补全</li>
+            <li>代码解释</li>
+            <li>代码重构</li>
+            <li>单元测试生成</li>
+            <li>Bug 检测</li>
+            <li>代码优化</li>
+        </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>版本 1.0.0</h3>
+        <ul>
+            <li>初始版本发布</li>
+            <li>支持 AI 对话功能</li>
+            <li>支持代码补全</li>
+            <li>支持代码分析功能</li>
+        </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 工具窗口 -->
+        <toolWindow id="AI Assistant"
+                    factoryClass="com.company.aiassistant.toolwindow.AIToolWindowFactory"
+                    anchor="right"
+                    icon="AllIcons.Actions.Show"/>
+
+        <!-- 代码补全提供者 -->
+        <completion.contributor language="any" implementationClass="com.company.aiassistant.completion.AICompletionContributor"/>
+
+        <!-- 编辑器上下文菜单 -->
+        <action id="ai.explainCode"
+                 class="com.company.aiassistant.actions.ExplainCodeAction"
+                 text="AI 解释代码"
+                 description="使用 AI 解释选中的代码">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </action>
+
+        <action id="ai.refactorCode"
+                 class="com.company.aiassistant.actions.RefactorCodeAction"
+                 text="AI 重构代码"
+                 description="使用 AI 重构选中的代码">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.explainCode"/>
+        </action>
+
+        <action id="ai.generateTests"
+                 class="com.company.aiassistant.actions.GenerateTestsAction"
+                 text="AI 生成测试"
+                 description="使用 AI 生成单元测试">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.refactorCode"/>
+        </action>
+
+        <action id="ai.optimizeCode"
+                 class="com.company.aiassistant.actions.OptimizeCodeAction"
+                 text="AI 优化代码"
+                 description="使用 AI 优化代码">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.generateTests"/>
+        </action>
+
+        <action id="ai.findBugs"
+                 class="com.company.aiassistant.actions.FindBugsAction"
+                 text="AI 查找问题"
+                 description="使用 AI 查找代码中的问题">
+            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.optimizeCode"/>
+        </action>
+
+        <!-- 主菜单 -->
+        <action id="ai.chat"
+                 class="com.company.aiassistant.actions.OpenChatAction"
+                 text="AI 对话"
+                 description="打开 AI 对话面板">
+            <add-to-group group-id="ToolsMenu" anchor="first"/>
+            <keyboard-shortcut first-keystroke="control shift A" keymap="$default"/>
+        </action>
+
+        <action id="ai.settings"
+                 class="com.company.aiassistant.actions.OpenSettingsAction"
+                 text="AI 设置"
+                 description="打开 AI 助手设置">
+            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="ai.chat"/>
+        </action>
+
+        <!-- 配置 -->
+        <applicationConfigurable parentId="tools"
+                                instance="com.company.aiassistant.config.AIConfigurable"
+                                id="ai.assistant.config"
+                                displayName="AI Assistant"/>
+
+        <!-- 图标 -->
+        <icon value="/icons/ai_icon.png"/>
+
+        <!-- 通知 -->
+        <notificationGroup id="AI Assistant Notifications"
+                           displayType="BALLOON"
+                           key="ai.assistant.notification"/>
+    </extensions>
+
+    <actions>
+        <group id="ai.toolbar">
+            <action id="ai.toolbar.send"
+                     class="com.company.aiassistant.actions.SendMessageAction"
+                     text="发送"
+                     description="发送消息"/>
+            <action id="ai.toolbar.clear"
+                     class="com.company.aiassistant.actions.ClearChatAction"
+                     text="清空"
+                     description="清空对话"/>
+        </group>
+    </actions>
+</idea-plugin>

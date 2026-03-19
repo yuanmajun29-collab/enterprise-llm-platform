@@ -1,0 +1,492 @@
+<!-- Enterprise LLM Assistant - Chat UI -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'none';
+        style-src 'unsafe-inline';
+        script-src 'unsafe-inline';
+        img-src https: data:;
+    ">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            max-width: 100%;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .model-selector label {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .model-selector select {
+            padding: 6px 12px;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            font-size: 13px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .model-selector select:hover {
+            border-color: #999;
+        }
+
+        .model-selector select:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            color: #666;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: #f0f0f0;
+            color: #333;
+            border-color: #c0c0c0;
+        }
+
+        .icon-btn:active {
+            background: #e0e0e0;
+        }
+
+        .icon-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+
+        .message {
+            display: flex;
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.assistant {
+            justify-content: flex-start;
+        }
+
+        .message.system {
+            justify-content: center;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: #007acc;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .message.system .message-bubble {
+            background: #f0f0f0;
+            color: #666;
+            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 20px;
+        }
+
+        .message-meta {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+        }
+
+        .message.assistant .message-meta {
+            text-align: left;
+        }
+
+        .message.user .message-meta {
+            text-align: right;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 12px;
+            padding: 16px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        #message-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #d0d0d0;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            resize: none;
+            min-height: 48px;
+            max-height: 120px;
+            line-height: 1.5;
+        }
+
+        #message-input:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        #message-input::placeholder {
+            color: #999;
+        }
+
+        #send-btn {
+            padding: 12px 24px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        #send-btn:hover:not(:disabled) {
+            background: #005a9e;
+        }
+
+        #send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .generating {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
+            font-size: 13px;
+        }
+
+        .generating::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border: 2px solid #007acc;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 8px;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: #999;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-8px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="model-selector">
+                <label for="model-select">模型:</label>
+                <select id="model-select">
+                    <option value="Qwen-72B-Chat">Qwen 72B Chat</option>
+                    <option value="Qwen-14B-Chat">Qwen 14B Chat</option>
+                    <option value="DeepSeek-Coder-33B">DeepSeek Coder 33B</option>
+                    <option value="Llama-3-70B-Instruct">Llama 3 70B</option>
+                </select>
+            </div>
+            <div class="actions">
+                <button id="clear-btn" title="清空对话" class="icon-btn">
+                    <svg width="16" height="16" viewBox="0 0 16 16">
+                        <path fill="currentColor" d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                    </svg>
+                </button>
+                <button id="export-btn" title="导出对话" class="icon-btn">
+                    <svg width="16" height="16" viewBox="0 0 16 16">
+                        <path fill="currentColor" d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="input-area">
+            <textarea id="message-input" placeholder="输入消息... (Shift+Enter 发送)" rows="3"></textarea>
+            <button id="send-btn" disabled>发送</button>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const vscode = acquireVsCodeApi();
+            const messagesDiv = document.getElementById('messages');
+            const input = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const exportBtn = document.getElementById('export-btn');
+            const modelSelect = document.getElementById('model-select');
+
+            let session = null;
+            let isGenerating = false;
+
+            // 监听来自扩展的消息
+            window.addEventListener('message', event => {
+                const message = event.data;
+                switch (message.type) {
+                    case 'init':
+                        session = message.session;
+                        renderMessages(session.messages);
+                        modelSelect.value = session.model || 'Qwen-72B-Chat';
+                        break;
+                    case 'message':
+                        addMessage(message.message);
+                        break;
+                    case 'chunk':
+                        appendChunk(message.content);
+                        break;
+                    case 'generating':
+                        isGenerating = message.value;
+                        updateUI();
+                        break;
+                    case 'error':
+                        showError(message.message);
+                        break;
+                    case 'cleared':
+                        messagesDiv.innerHTML = '';
+                        break;
+                }
+            });
+
+            // 渲染消息
+            function renderMessages(messages) {
+                messagesDiv.innerHTML = '';
+                messages.forEach(msg => addMessage(msg));
+            }
+
+            // 添加消息
+            function addMessage(message) {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${message.type}`;
+                
+                const bubble = document.createElement('div');
+                bubble.className = 'message-bubble';
+                
+                if (message.type === 'assistant') {
+                    bubble.innerHTML = formatContent(message.content);
+                } else {
+                    bubble.textContent = message.content;
+                }
+
+                messageEl.appendChild(bubble);
+
+                if (message.type !== 'system') {
+                    const meta = document.createElement('div');
+                    meta.className = 'message-meta';
+                    meta.textContent = new Date(message.timestamp).toLocaleTimeString();
+                    messageEl.appendChild(meta);
+                }
+
+                messagesDiv.appendChild(messageEl);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            // 追加流式响应
+            function appendChunk(content) {
+                const lastMessage = messagesDiv.querySelector('.message.assistant:last-child');
+                if (lastMessage) {
+                    const bubble = lastMessage.querySelector('.message-bubble');
+                    if (bubble) {
+                        bubble.innerHTML = formatContent(bubble.textContent + content);
+                        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                    }
+                }
+            }
+
+            // 格式化内容（Markdown 简化版）
+            function formatContent(content) {
+                // 代码块
+                content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+                // 行内代码
+                content = content.replace(/`([^`]+)`/g, '<code>$1</code>');
+                // 加粗
+                content = content.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+                // 换行
+                content = content.replace(/\n/g, '<br>');
+                return content;
+            }
+
+            // 显示错误
+            function showError(message) {
+                const errorEl = document.createElement('div');
+                errorEl.style.cssText = 'padding: 12px; background: #fee; border-radius: 8px; margin-bottom: 16px; color: #c33;';
+                errorEl.textContent = `❌ ${message}`;
+                messagesDiv.appendChild(errorEl);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            // 更新 UI
+            function updateUI() {
+                sendBtn.disabled = isGenerating || !input.value.trim();
+                if (isGenerating) {
+                    sendBtn.textContent = '生成中...';
+                    sendBtn.classList.add('generating');
+                } else {
+                    sendBtn.textContent = '发送';
+                    sendBtn.classList.remove('generating');
+                }
+            }
+
+            // 发送消息
+            function sendMessage() {
+                const content = input.value.trim();
+                if (!content || isGenerating) {
+                    return;
+                }
+
+                vscode.postMessage({
+                    type: 'sendMessage',
+                    content: content
+                });
+
+                input.value = '';
+                input.style.height = '48px';
+                updateUI();
+            }
+
+            // 清空对话
+            clearBtn.addEventListener('click', () => {
+                vscode.postMessage({ type: 'clear' });
+            });
+
+            // 导出对话
+            exportBtn.addEventListener('click', () => {
+                vscode.postMessage({ type: 'export' });
+            });
+
+            // 模型选择
+            modelSelect.addEventListener('change', () => {
+                vscode.postMessage({
+                    type: 'modelChange',
+                    model: modelSelect.value
+                });
+            });
+
+            // 输入事件
+            input.addEventListener('input', () => {
+                updateUI();
+            });
+
+            // 键盘事件
+            input.addEventListener('keydown', event => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                }
+                // 自动调整高度
+                if (event.key === 'Enter' && event.shiftKey) {
+                    input.style.height = input.scrollHeight + 'px';
+                }
+            });
+
+            // 发送按钮
+            sendBtn.addEventListener('click', sendMessage);
+
+            // 聚焦输入
+            input.focus();
+        })();
+    </script>
+</body>
+</html>

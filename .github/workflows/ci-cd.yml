@@ -1,0 +1,254 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20.x'
+  REGISTRY: ghcr.io
+
+jobs:
+  # ============================
+  # Lint & Test (API Server)
+  # ============================
+  api-lint-test:
+    name: API Server - Lint & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api-server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript type check
+        run: npm run type-check
+
+      - name: Run unit tests
+        run: npm test -- --coverage
+        env:
+          CI: true
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: api-server
+
+  # ============================
+  # Build & Test (VS Code Plugin)
+  # ============================
+  vscode-plugin-build:
+    name: VS Code Plugin - Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./plugin/vscode
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Build plugin
+        run: npm run compile
+
+      - name: Run tests
+        run: npm test
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-plugin
+          path: plugin/vscode/*.vsix
+
+  # ============================
+  # Build & Test (JetBrains Plugin)
+  # ============================
+  jetbrains-plugin-build:
+    name: JetBrains Plugin - Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./plugin/jetbrains
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build plugin
+        run: ./gradlew buildPlugin
+
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetbrains-plugin
+          path: plugin/jetbrains/build/distributions/*.zip
+
+  # ============================
+  # Docker Build
+  # ============================
+  docker-build:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [api-lint-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push API Server image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api-server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ============================
+  # Security Scan
+  # ============================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ============================
+  # Deploy (Staging)
+  # ============================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /opt/enterprise-llm-platform
+            docker-compose pull
+            docker-compose up -d
+            docker system prune -f
+
+  # ============================
+  # Deploy (Production)
+  # ============================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/enterprise-llm-platform
+            docker-compose pull
+            docker-compose up -d
+            docker system prune -f
+
+      - name: Notify deployment
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Production deployment ${{ job.status }}: ${{ github.sha }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
