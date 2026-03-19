@@ -299,26 +299,33 @@ export class AIClient extends EventEmitter {
 
     /**
      * 代码补全
-     * POST /api/code/complete
+     * POST /v1/completions (vLLM 原生端点)
      */
     async codeCompletion(
         code: string,
-        language: string,
-        cursorPosition: number,
+        _language: string,
+        _cursorPosition: number,
         model?: string
     ): Promise<CodeCompletionResponse> {
         const config = vscode.workspace.getConfiguration('llm-assistant');
 
-        const response = await this.requestWithRetry<CodeCompletionResponse>(
-            () => this.axiosInstance.post<CodeCompletionResponse>('/api/code/complete', {
-                code,
-                language,
-                cursor_position: cursorPosition,
+        const response = await this.requestWithRetry<any>(
+            () => this.axiosInstance.post<any>('/v1/completions', {
                 model: model || config.get('defaultModel', 'Qwen-72B-Chat'),
+                prompt: code,
+                max_tokens: 256,
+                temperature: 0.2,
+                stop: ['\n\n', 'Human:', 'Assistant:'],
             })
         );
 
-        return response.data;
+        // 适配 vLLM /v1/completions 响应格式
+        const data = response.data;
+        return {
+            completion: data.choices?.[0]?.text || '',
+            model: data.model,
+            usage: data.usage,
+        };
     }
 
     // ==================== 便捷方法 ====================

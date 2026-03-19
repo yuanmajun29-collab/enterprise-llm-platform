@@ -183,6 +183,8 @@ curl -X POST https://your-api.com/v1/chat/completions \
 curl -X POST https://your-api.com/api/code/complete \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Content-Type: application/json" \
+
+  
   -d '{
     "code": "def fibonacci(n):",
     "language": "python",

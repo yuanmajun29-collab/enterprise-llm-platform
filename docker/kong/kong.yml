@@ -12,7 +12,6 @@ services:
           - POST
         strip_path: false
         plugins:
-          - name: jwt
           - name: rate-limiting
             config:
               minute: 60
@@ -34,7 +33,6 @@ services:
           - POST
         strip_path: false
         plugins:
-          - name: jwt
           - name: rate-limiting
             config:
               minute: 60
@@ -50,8 +48,6 @@ services:
         methods:
           - GET
         strip_path: false
-        plugins:
-          - name: jwt
 
       - name: llm-embeddings
         paths:
@@ -60,7 +56,6 @@ services:
           - POST
         strip_path: false
         plugins:
-          - name: jwt
           - name: rate-limiting
             config:
               minute: 30
@@ -95,7 +90,6 @@ services:
           - /api/
         strip_path: false
         plugins:
-          - name: jwt
           - name: rate-limiting
             config:
               minute: 60
