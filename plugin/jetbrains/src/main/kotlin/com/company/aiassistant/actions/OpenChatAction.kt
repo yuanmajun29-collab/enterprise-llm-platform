@@ -10,12 +10,9 @@ import com.intellij.openapi.wm.ToolWindowManager
  */
 class OpenChatAction : AnAction("AI 对话", "打开 AI 对话面板", null) {
     override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-
-        val toolWindowManager = ToolWindowManager.getInstance(project)
-        val toolWindow = toolWindowManager.getToolWindow("AI Assistant")
-
-        toolWindow?.show {
+        val project: Project = e.project ?: return
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("AI Assistant")
+        toolWindow?.activate {
             // 工具窗口已显示
         }
     }

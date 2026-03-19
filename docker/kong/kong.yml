@@ -86,6 +86,30 @@ services:
           - /auth/*
         strip_path: false
 
+  # API Server 服务
+  - name: api-server-service
+    url: http://api-server:8080
+    routes:
+      - name: api-server-route
+        paths:
+          - /api/
+        strip_path: false
+        plugins:
+          - name: jwt
+          - name: rate-limiting
+            config:
+              minute: 60
+              hour: 1000
+              policy: redis
+              redis_host: redis
+              redis_port: 6379
+              redis_password: ${REDIS_PASSWORD}
+          - name: request-transformer
+            config:
+              add:
+                headers:
+                  - X-Request-ID:$(uuid)
+
 plugins:
   # CORS 支持
   - name: cors
@@ -128,6 +152,23 @@ plugins:
 
 upstreams:
   - name: vllm-upstream
+    algorithm: round-robin
+    slots: 10
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        healthy:
+          interval: 5
+          successes: 2
+        unhealthy:
+          interval: 10
+          http_failures: 3
+          tcp_failures: 3
+          timeouts: 3
+
+  # API Server 上游
+  - name: api-server-upstream
     algorithm: round-robin
     slots: 10
     healthchecks:

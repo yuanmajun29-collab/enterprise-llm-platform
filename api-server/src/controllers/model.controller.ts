@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { query, insert, update, queryOne, remove } from '../config/database';
+import { query, insert, queryOne, remove } from '../config/database';
 
 /**
  * 获取所有模型

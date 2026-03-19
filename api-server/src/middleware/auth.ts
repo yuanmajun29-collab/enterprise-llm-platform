@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { queryOne } from '../config/database';
-import { cacheGet, cacheSet } from '../config/redis';
 import { logger } from '../utils/logger';
 
 // ========================================
@@ -22,6 +21,8 @@ declare global {
   }
 }
 
+type AuthUser = NonNullable<Express.Request['user']>;
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
 // ========================================
@@ -31,7 +32,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 /**
  * 验证 Bearer Token（JWT）
  */
-function authenticateByJWT(token: string): Express['Request']['user'] | null {
+function authenticateByJWT(token: string): AuthUser | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as {
       userId: string;
@@ -62,7 +63,7 @@ function authenticateByJWT(token: string): Express['Request']['user'] | null {
 /**
  * 验证 API Key
  */
-async function authenticateByApiKey(apiKey: string): Promise<Express['Request']['user'] | null> {
+async function authenticateByApiKey(apiKey: string): Promise<AuthUser | null> {
   try {
     const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
     const keyPrefix = apiKey.substring(0, 12);
@@ -193,7 +194,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
  * 可选认证中间件
  * 尝试认证但不强制，如果无 token 则继续但不设置 req.user
  */
-export async function optionalAuthenticate(req: Request, res: Response, next: NextFunction) {
+export async function optionalAuthenticate(req: Request, _res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -252,7 +253,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     });
   }
 
-  next();
+  return next();
 }
 
 // ========================================
@@ -312,7 +313,7 @@ export function rateLimit(options: RateLimitOptions) {
       multi.expire(rateLimitKey, windowSeconds + 1);
       const results = await multi.exec();
 
-      const currentCount = results?.[2]?.[1] as number || 0;
+      const currentCount = (results?.[2] as any)?.[1] as number || 0;
 
       // 设置限流响应头
       res.setHeader('X-RateLimit-Limit', String(maxRequests));

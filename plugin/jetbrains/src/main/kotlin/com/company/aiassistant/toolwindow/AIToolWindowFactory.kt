@@ -1,360 +1,378 @@
 package com.company.aiassistant.toolwindow
 
-import com.company.aiassistant.config.AIAssistantConfig
+import com.company.aiassistant.config.AIAssistantSettings
 import com.company.aiassistant.service.AIService
-import com.company.aiassistant.service.AIMessage
-import com.intellij.ide.ui.laf.darcula.DarculaLaf
+import com.company.aiassistant.service.ChatMessage
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.editor.EditorFactory
-import com.intellij.openapi.editor.event.DocumentEvent
-import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.*
-import com.intellij.openapi.util.Disposer
-import com.intellij.ui.components.JBList
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextArea
-import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
-import org.jetbrains.kotlin.idea.KotlinLanguage
 import java.awt.*
 import java.awt.event.*
 import javax.swing.*
 
 /**
  * AI 工具窗口
+ *
+ * - 聊天面板（消息列表 + 输入框 + 发送/停止按钮）
+ * - 支持流式输出
+ * - 异步调用 AIService
  */
 class AIToolWindow(private val project: Project) : Disposable {
+
     private val logger = Logger.getInstance(AIToolWindow::class.java)
     private val aiService: AIService = project.service()
-    private val config: AIAssistantConfig = AIAssistantConfig.getInstance()
+    private val settings: AIAssistantSettings = AIAssistantSettings.getInstance()
 
-    private val mainPanel: JPanel = JPanel(BorderLayout())
-    private val messagePanel: JPanel = JPanel()
-    private val inputPanel: JPanel = JPanel()
-    private val messageScrollPane: JScrollPane
-    private val inputTextArea: JTextArea
-    private val sendButton: JButton
-    private val clearButton: JButton
-    private val modelComboBox: JComboBox<String>
+    private val mainPanel = JPanel(BorderLayout())
+    private val messagePanel = JPanel()
+    private val messageScrollPane: JBScrollPane
+    private val inputTextArea = JTextArea()
+    private val sendButton = JButton("发送")
+    private val stopButton = JButton("⏹ 停止")
+    private val clearButton = JButton("清空")
+    private val modelComboBox = JComboBox(
+        arrayOf("Qwen-72B-Chat", "Qwen-14B-Chat", "DeepSeek-Coder-33B", "Llama-3-70B-Instruct")
+    )
+    private val tokenCountLabel = JBLabel("Tokens: 0")
 
-    private val messages = mutableListOf<ChatMessageItem>()
+    private val chatMessages = mutableListOf<ChatMessageItem>()
     private var isGenerating = false
+    private var currentFuture: java.util.concurrent.Future<*>? = null
 
     init {
-        // 初始化 AI 服务配置
         updateServiceConfig()
 
-        // 主面板设置
-        mainPanel.preferredSize = Dimension(400, 600)
-        mainPanel.border = JBUI.Borders.empty(5)
-
-        // 模型选择器
-        val topPanel = JPanel(BorderLayout())
-        topPanel.border = JBUI.Borders.empty(0, 0, 10, 0)
-
-        val modelLabel = JLabel("模型:")
-        modelComboBox = JComboBox(arrayOf("Qwen-72B-Chat", "Qwen-14B-Chat", "DeepSeek-Coder-33B", "Llama-3-70B-Instruct"))
-        modelComboBox.selectedItem = config.model
-        modelComboBox.addActionListener { e ->
-            val selectedModel = modelComboBox.selectedItem as? String ?: "Qwen-72B-Chat"
-            config.model = selectedModel
-            aiService.setModel(selectedModel)
+        // ===== 顶部面板 =====
+        val topPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(8)
         }
 
-        val modelPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        modelPanel.add(modelLabel)
-        modelPanel.add(modelComboBox)
+        val modelPanel = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+            add(JBLabel("模型:"))
+            add(modelComboBox)
+        }
         topPanel.add(modelPanel, BorderLayout.WEST)
+
+        val statusPanel = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
+            add(tokenCountLabel)
+        }
+        topPanel.add(statusPanel, BorderLayout.EAST)
 
         mainPanel.add(topPanel, BorderLayout.NORTH)
 
-        // 消息面板
+        // ===== 消息面板 =====
         messagePanel.layout = BoxLayout(messagePanel, BoxLayout.Y_AXIS)
         messagePanel.background = UIUtil.getPanelBackground()
-        messageScrollPane = JBScrollPane(messagePanel)
-        messageScrollPane.border = JBUI.Borders.empty()
-        messageScrollPane.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+        messageScrollPane = JBScrollPane(messagePanel).apply {
+            border = JBUI.Borders.empty()
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+        }
         mainPanel.add(messageScrollPane, BorderLayout.CENTER)
 
-        // 输入面板
-        inputPanel.layout = BorderLayout(5, 5)
-        inputPanel.border = JBUI.Borders.empty(10, 0, 0, 0)
+        // ===== 输入面板 =====
+        val inputPanel = JPanel(BorderLayout(8, 8)).apply {
+            border = JBUI.Borders.empty(8)
+        }
 
-        inputTextArea = JBTextArea().apply {
+        inputTextArea.apply {
             rows = 4
             wrapStyleWord = true
             lineWrap = true
-            border = JBUI.Borders.empty(5)
             font = JBUI.Fonts.label()
+            border = JBUI.Borders.customLine(UIUtil.getBoundsColor(), 1)
         }
-        inputTextArea.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER && e.isShiftDown) {
-                    sendMessage()
-                    e.consume()
-                }
-            }
-        })
 
-        val scrollPane = JBScrollPane(inputTextArea)
-        inputPanel.add(scrollPane, BorderLayout.CENTER)
+        val inputScrollPane = JBScrollPane(inputTextArea)
+        inputPanel.add(inputScrollPane, BorderLayout.CENTER)
 
         // 按钮面板
-        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT))
-        sendButton = JButton("发送").apply {
-            isEnabled = false
-            addActionListener { sendMessage() }
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+            add(clearButton)
+            add(stopButton.apply { isVisible = false })
+            add(sendButton)
         }
-        clearButton = JButton("清空").apply {
-            addActionListener { clearChat() }
-        }
-        buttonPanel.add(clearButton)
-        buttonPanel.add(sendButton)
-
         inputPanel.add(buttonPanel, BorderLayout.SOUTH)
 
         mainPanel.add(inputPanel, BorderLayout.SOUTH)
 
-        // 监听输入变化
-        inputTextArea.document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = updateSendButton()
-            override fun removeUpdate(e: DocumentEvent) = updateSendButton()
-            override fun changedUpdate(e: DocumentEvent) = updateSendButton()
+        // ===== 事件绑定 =====
+        modelComboBox.selectedItem = settings.defaultModel
+        modelComboBox.addActionListener {
+            val selected = modelComboBox.selectedItem as? String ?: "Qwen-72B-Chat"
+            aiService.setModel(selected)
+            settings.state.defaultModel = selected
+        }
+
+        sendButton.addActionListener { sendMessage() }
+
+        stopButton.addActionListener {
+            currentFuture?.cancel(true)
+            currentFuture = null
+            isGenerating = false
+            updateButtonStates()
+        }
+
+        clearButton.addActionListener { clearChat() }
+
+        inputTextArea.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ENTER && e.isShiftDown) {
+                    e.consume()
+                    sendMessage()
+                }
+            }
         })
+
+        inputTextArea.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent) = updateButtonStates()
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent) = updateButtonStates()
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent) = updateButtonStates()
+        })
+
+        // 显示欢迎消息
+        addSystemMessage("欢迎使用企业大模型助手！输入消息开始对话。")
     }
 
-    /**
-     * 更新服务配置
-     */
-    private fun updateServiceConfig() {
-        aiService.configure(
-            apiUrl = config.apiUrl,
-            apiKey = config.apiKey,
-            accessToken = config.accessToken
-        )
-    }
+    // ==================== 聊天逻辑 ====================
 
-    /**
-     * 更新发送按钮状态
-     */
-    private fun updateSendButton() {
-        sendButton.isEnabled = !isGenerating && inputTextArea.text.trim().isNotEmpty()
-    }
-
-    /**
-     * 发送消息
-     */
     private fun sendMessage() {
         val content = inputTextArea.text.trim()
         if (content.isEmpty() || isGenerating) return
+
+        // 更新服务配置
+        updateServiceConfig()
 
         // 添加用户消息
         addMessage("user", content)
         inputTextArea.text = ""
 
-        // 准备 AI 请求
-        val aiMessages = listOf(
-            AIMessage("system", config.systemPrompt),
-            *messages.map { AIMessage(it.role, it.content) }.toTypedArray()
-        )
-
         isGenerating = true
-        updateSendButton()
-        sendButton.text = "生成中..."
+        updateButtonStates()
+
+        // 构建消息列表
+        val aiMessages = mutableListOf(
+            ChatMessage("system", settings.systemPrompt)
+        )
+        aiMessages.addAll(chatMessages.filter { it.role != "system" }.map {
+            ChatMessage(it.role, it.content)
+        })
 
         // 创建助手消息占位
-        val assistantMessage = addMessage("assistant", "")
+        val assistantItem = addMessage("assistant", "")
 
-        ApplicationManager.getApplication().executeOnPooledThread {
-            try {
-                val response = if (config.enableStream) {
-                    chatStream(aiMessages, assistantMessage)
-                } else {
-                    chat(aiMessages, assistantMessage)
-                }
+        if (settings.enableStream) {
+            // 流式请求
+            currentFuture = aiService.chatCompletionStream(aiMessages, { chunk ->
+                // 在 EDT 中更新 UI
+                assistantItem.appendContent(chunk)
                 scrollToBottom()
-            } catch (e: Exception) {
-                logger.error("Failed to send message", e)
+            }).thenApply { response ->
                 ApplicationManager.getApplication().invokeLater {
-                    assistantMessage.content = "请求失败: ${e.message}"
-                    assistantMessage.panel.revalidate()
-                    assistantMessage.panel.repaint()
+                    assistantItem.setContent(response.choices.firstOrNull()?.message?.content ?: "")
+                    response.usage?.let {
+                        tokenCountLabel.text = "Tokens: ${it.totalTokens}"
+                    }
+                    scrollToBottom()
                 }
-            } finally {
-                isGenerating = false
+            }.exceptionally { error ->
                 ApplicationManager.getApplication().invokeLater {
-                    updateSendButton()
-                    sendButton.text = "发送"
+                    assistantItem.setContent("请求失败: ${error.message}")
+                    Messages.showErrorDialog(project, "请求失败: ${error.message}", "AI 助手")
+                }
+                null
+            }
+        } else {
+            // 非流式请求
+            currentFuture = aiService.chatCompletion(aiMessages).thenApply { response ->
+                ApplicationManager.getApplication().invokeLater {
+                    val resultContent = response.choices.firstOrNull()?.message?.content ?: ""
+                    assistantItem.setContent(resultContent)
+                    response.usage?.let {
+                        tokenCountLabel.text = "Tokens: ${it.totalTokens}"
+                    }
+                    scrollToBottom()
+                }
+            }.exceptionally { error ->
+                ApplicationManager.getApplication().invokeLater {
+                    assistantItem.setContent("请求失败: ${error.message}")
+                    Messages.showErrorDialog(project, "请求失败: ${error.message}", "AI 助手")
+                }
+                null
+            }
+        }
+
+        // 最终状态更新
+        currentFuture?.let { future ->
+            CompletableFuture.runAsync {
+                try {
+                    future.get()
+                } catch (_: Exception) {
+                } finally {
+                    ApplicationManager.getApplication().invokeLater {
+                        isGenerating = false
+                        currentFuture = null
+                        updateButtonStates()
+                    }
                 }
             }
         }
     }
 
-    /**
-     * 聊天请求
-     */
-    private fun chat(aiMessages: List<AIMessage>, assistantMessage: ChatMessageItem) {
-        val response = aiService.chat(aiMessages, false).get()
-        ApplicationManager.getApplication().invokeLater {
-            assistantMessage.content = response.choices.firstOrNull()?.message?.content ?: ""
-            assistantMessage.panel.revalidate()
-            assistantMessage.panel.repaint()
-        }
-    }
-
-    /**
-     * 流式聊天
-     */
-    private fun chatStream(aiMessages: List<AIMessage>, assistantMessage: ChatMessageItem) {
-        val response = aiService.chat(aiMessages, true).get()
-        ApplicationManager.getApplication().invokeLater {
-            assistantMessage.content = response.choices.firstOrNull()?.message?.content ?: ""
-            assistantMessage.panel.revalidate()
-            assistantMessage.panel.repaint()
-        }
-    }
-
-    /**
-     * 添加消息到面板
-     */
-    private fun addMessage(role: String, content: String): ChatMessageItem {
-        val messageItem = ChatMessageItem(role, content)
-        messages.add(messageItem)
-        messagePanel.add(messageItem.panel)
-        messagePanel.revalidate()
-        messagePanel.repaint()
-        scrollToBottom()
-        return messageItem
-    }
-
-    /**
-     * 滚动到底部
-     */
-    private fun scrollToBottom() {
-        SwingUtilities.invokeLater {
-            val verticalBar = messageScrollPane.verticalScrollBar
-            verticalBar.value = verticalBar.maximum
-        }
-    }
-
-    /**
-     * 清空对话
-     */
     private fun clearChat() {
-        if (messages.isEmpty()) return
-
-        val result = JOptionPane.showConfirmDialog(
-            mainPanel,
-            "确定要清空所有对话吗？",
-            "清空对话",
-            JOptionPane.YES_NO_OPTION
-        )
-
-        if (result == JOptionPane.YES_OPTION) {
-            messages.clear()
+        if (chatMessages.isEmpty()) return
+        val result = Messages.showYesNoDialog("确定要清空所有对话吗？", "清空对话", Messages.getQuestionIcon())
+        if (result == Messages.YES) {
+            chatMessages.clear()
             messagePanel.removeAll()
             messagePanel.revalidate()
             messagePanel.repaint()
+            aiService.resetTokenCount()
+            tokenCountLabel.text = "Tokens: 0"
         }
     }
 
-    /**
-     * 获取主面板
-     */
-    fun getComponent(): JComponent = mainPanel
+    // ==================== 消息渲染 ====================
 
-    /**
-     * 聊天消息项
-     */
-    private inner class ChatMessageItem(val role: String, content: String) {
-        var content: String = content
-            set(value) {
-                field = value
-                updateContentPanel()
-            }
+    private fun addMessage(role: String, content: String): ChatMessageItem {
+        val item = ChatMessageItem(role, content)
+        chatMessages.add(item)
+        messagePanel.add(item.panel)
+        messagePanel.revalidate()
+        messagePanel.repaint()
+        scrollToBottom()
+        return item
+    }
 
-        val panel: JPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            border = JBUI.Borders.empty(5)
-            background = UIUtil.getPanelBackground()
-        }
+    private fun addSystemMessage(text: String) {
+        val item = ChatMessageItem("system", text)
+        chatMessages.add(item)
+        messagePanel.add(item.panel)
+        messagePanel.revalidate()
+        messagePanel.repaint()
+    }
 
-        private val contentPanel: JPanel
-
-        init {
-            // 头像
-            val avatar = JLabel(
-                when (role) {
-                    "user" -> "👤"
-                    "assistant" -> "🤖"
-                    else -> "ℹ️"
-                }
-            ).apply {
-                font = Font("Arial", Font.PLAIN, 20)
-            }
-
-            // 内容面板
-            contentPanel = JPanel().apply {
-                layout = BorderLayout()
-                border = JBUI.Borders.compound(
-                    JBUI.Borders.empty(10),
-                    JBUI.Borders.line(when (role) {
-                        "user" -> JBUI.CurrentTheme.ActionButton.hoverBorder()
-                        "assistant" -> JBUI.CurrentTheme.ActionButton.focusedBorder()
-                        else -> JBUI.CurrentTheme.ActionButton.defaultBorder()
-                    })
-                )
-                background = when (role) {
-                    "user" -> JBUI.CurrentTheme.ActionButton.hoverBackground()
-                    "assistant" -> JBUI.CurrentTheme.ActionButton.focusedBackground()
-                    else -> UIUtil.getPanelBackground()
-                }
-            }
-
-            val textPane = JTextArea().apply {
-                this.text = content
-                isEditable = false
-                wrapStyleWord = true
-                lineWrap = true
-                font = JBUI.Fonts.label()
-                background = Color(0, 0, 0, 0)
-                border = null
-            }
-
-            contentPanel.add(textPane, BorderLayout.CENTER)
-
-            panel.add(avatar)
-            panel.add(Box.createHorizontalStrut(10))
-            panel.add(contentPanel)
-        }
-
-        private fun updateContentPanel() {
-            val textPane = contentPanel.getComponent(0) as JTextArea
-            textPane.text = content
-            contentPanel.revalidate()
-            contentPanel.repaint()
+    private fun scrollToBottom() {
+        SwingUtilities.invokeLater {
+            val bar = messageScrollPane.verticalScrollBar
+            bar.value = bar.maximum
         }
     }
+
+    private fun updateButtonStates() {
+        val hasContent = inputTextArea.text.trim().isNotEmpty()
+        sendButton.isEnabled = hasContent && !isGenerating
+        sendButton.isVisible = !isGenerating
+        stopButton.isVisible = isGenerating
+    }
+
+    private fun updateServiceConfig() {
+        aiService.configure(settings.toAIConfig())
+        aiService.setModel(settings.defaultModel)
+    }
+
+    fun getContent(): JComponent = mainPanel
 
     override fun dispose() {
-        // 清理资源
+        currentFuture?.cancel(true)
+    }
+
+    // ==================== 内部消息项 ====================
+
+    private inner class ChatMessageItem(val role: String, initialContent: String) {
+        var content: String = initialContent
+
+        val panel: JPanel = JPanel().apply {
+            layout = BorderLayout(8, 4)
+            border = JBUI.Borders.empty(6, 8)
+            background = UIUtil.getPanelBackground()
+            alignmentX = Component.LEFT_ALIGNMENT
+            maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
+        }
+
+        private val avatarLabel = JLabel(
+            when (role) {
+                "user" -> "👤"
+                "assistant" -> "🤖"
+                else -> "ℹ️"
+            }
+        ).apply {
+            font = Font("Arial", Font.PLAIN, 18)
+            preferredSize = Dimension(24, 24)
+        }
+
+        private val contentPane = JPanel(BorderLayout()).apply {
+            background = when (role) {
+                "user" -> Color(14, 99, 156)
+                "assistant" -> UIUtil.getPanelBackground()
+                else -> Color(240, 240, 240)
+            }
+
+            if (role != "user") {
+                border = JBUI.Borders.customLine(JBUI.CurrentTheme.List.SeparatorColor(), 1)
+            }
+        }
+
+        private val textArea = JTextArea(initialContent).apply {
+            isEditable = false
+            wrapStyleWord = true
+            lineWrap = true
+            font = JBUI.Fonts.label()
+            background = Color(0, 0, 0, 0)
+            border = JBUI.Borders.empty(4)
+            isOpaque = false
+
+            if (role == "user") {
+                foreground = Color.WHITE
+            }
+        }
+
+        init {
+            val wrapper = JPanel(BorderLayout()).apply {
+                background = UIUtil.getPanelBackground()
+                alignmentX = Component.LEFT_ALIGNMENT
+                preferredSize = Dimension(24, 24)
+            }
+            wrapper.add(avatarLabel, BorderLayout.NORTH)
+            panel.add(wrapper, BorderLayout.WEST)
+            contentPane.add(JBScrollPane(textArea), BorderLayout.CENTER)
+            panel.add(contentPane, BorderLayout.CENTER)
+        }
+
+        fun setContent(newContent: String) {
+            content = newContent
+            textArea.text = newContent
+            textPane.revalidate()
+            textPane.repaint()
+        }
+
+        fun appendContent(chunk: String) {
+            content += chunk
+            textArea.append(chunk)
+            textPane.revalidate()
+            textPane.repaint()
+        }
     }
 }
 
 /**
- * AI 工具窗口工厂
+ * 工具窗口工厂
  */
-class AIToolWindowFactory : com.intellij.openapi.wm.ToolWindowFactory {
-    override fun createToolWindowContent(project: com.intellij.openapi.project.Project, toolWindow: com.intellij.openapi.wm.ToolWindow) {
+class AIToolWindowFactory : ToolWindowFactory {
+
+    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val aiToolWindow = AIToolWindow(project)
         val contentFactory = com.intellij.openapi.wm.ToolWindowContentFactory.getInstance()
-        val content = contentFactory.createContent(aiToolWindow.getComponent(), "", false)
+        val content = contentFactory.createContent(aiToolWindow.getContent(), "", false)
         toolWindow.contentManager.addContent(content)
     }
+
+    override fun shouldBeAvailable(project: Project): Boolean = true
 }

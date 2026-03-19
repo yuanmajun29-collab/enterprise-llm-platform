@@ -20,22 +20,68 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DOCKER_DIR="$PROJECT_DIR/docker"
 ENV_FILE="$DOCKER_DIR/.env"
 
-# 日志函数
+# 解析命令行参数
+SKIP_MODELS=false
+ONLY_INFRA=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --skip-models)
+      SKIP_MODELS=true
+      shift
+      ;;
+    --only-infra)
+      ONLY_INFRA=true
+      shift
+      ;;
+    -h|--help)
+      echo "用法: $0 [选项]"
+      echo ""
+      echo "选项:"
+      echo "  --skip-models    跳过模型下载"
+      echo "  --only-infra     只启动基础设施（postgres, redis, kong, keycloak），不启动 vllm 和 api-server"
+      echo "  -h, --help       显示帮助信息"
+      exit 0
+      ;;
+    *)
+      echo "未知参数: $1"
+      echo "使用 -h 查看帮助"
+      exit 1
+      ;;
+  esac
+done
+
+# ========================================
+# 部署日志
+# ========================================
+LOG_DIR="$PROJECT_DIR/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
+
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $1"
+    echo -e "${BLUE}${msg}${NC}"
+    echo "$msg" >> "$LOG_FILE"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] $1"
+    echo -e "${GREEN}${msg}${NC}"
+    echo "$msg" >> "$LOG_FILE"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [WARNING] $1"
+    echo -e "${YELLOW}${msg}${NC}"
+    echo "$msg" >> "$LOG_FILE"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $1"
+    echo -e "${RED}${msg}${NC}"
+    echo "$msg" >> "$LOG_FILE"
 }
+
+log_info "部署日志: $LOG_FILE"
 
 # ========================================
 # 1. 环境检查
@@ -166,6 +212,11 @@ EOF
 # 3. 模型下载
 # ========================================
 download_models() {
+    if [ "$SKIP_MODELS" = true ]; then
+        log_info "跳过模型下载 (--skip-models)"
+        return
+    fi
+
     log_info "准备模型下载..."
 
     local models_dir="$PROJECT_DIR/models"
@@ -218,31 +269,26 @@ start_services() {
     # 创建必要目录
     mkdir -p "$PROJECT_DIR/logs" "$PROJECT_DIR/data"
 
-    # 启动服务
-    log_info "使用 Docker Compose 启动服务..."
-    docker-compose up -d
+    # 根据模式选择启动的服务
+    if [ "$ONLY_INFRA" = true ]; then
+        log_info "仅启动基础设施服务 (--only-infra)"
+        log_info "将启动: postgres, redis, kong, keycloak"
+        log_info "将跳过: vllm, api-server"
+
+        # 获取 docker-compose 命令
+        local compose_cmd="docker-compose"
+        if ! command -v docker-compose &> /dev/null; then
+            compose_cmd="docker compose"
+        fi
+
+        # 只启动基础设施服务
+        $compose_cmd up -d postgres redis kong keycloak 2>&1 | tee -a "$LOG_FILE"
+    else
+        log_info "使用 Docker Compose 启动所有服务..."
+        docker-compose up -d 2>&1 | tee -a "$LOG_FILE"
+    fi
 
     log_success "服务启动中..."
-
-    # 等待服务就绪
-    log_info "等待服务启动..."
-    local max_wait=120
-    local wait_count=0
-
-    while [ $wait_count -lt $max_wait ]; do
-        if curl -f -s http://localhost:8000/health &> /dev/null; then
-            log_success "推理服务已就绪"
-            break
-        fi
-        echo -n "."
-        sleep 2
-        wait_count=$((wait_count + 2))
-    done
-    echo
-
-    if [ $wait_count -ge $max_wait ]; then
-        log_warning "服务启动超时，请检查日志"
-    fi
 }
 
 # ========================================
@@ -254,7 +300,83 @@ health_check() {
     # 检查各服务状态
     echo ""
     echo "服务状态:"
-    docker-compose ps
+    docker-compose ps 2>&1 | tee -a "$LOG_FILE"
+
+    # 循环检查所有服务的健康端点
+    local services=(
+        "API Gateway|http://localhost:8443/health|120"
+        "Keycloak|http://localhost:8080|90"
+        "Grafana|http://localhost:3000/api/health|60"
+        "Prometheus|http://localhost:9090/-/healthy|30"
+        "PostgreSQL|tcp://localhost:5432|30"
+        "Redis|tcp://localhost:6379|15"
+    )
+
+    echo ""
+    log_info "循环检查服务健康状态..."
+
+    local failed_services=()
+
+    for service_info in "${services[@]}"; do
+        IFS='|' read -r name url timeout <<< "$service_info"
+
+        log_info "检查 $name ($url)..."
+
+        if [[ "$url" == tcp://* ]]; then
+            # TCP 端口检查
+            local host_port="${url#tcp://}"
+            local host="${host_port%%:*}"
+            local port="${host_port##*:}"
+
+            local retries=0
+            local max_retries=$((timeout / 3))
+            local healthy=false
+
+            while [ $retries -lt $max_retries ]; do
+                if timeout 3 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
+                    log_success "$name 可用 (端口 $port)"
+                    healthy=true
+                    break
+                fi
+                retries=$((retries + 1))
+                sleep 3
+            done
+
+            if [ "$healthy" = false ]; then
+                log_warning "$name 未就绪 (端口 $port) — 请检查日志"
+                failed_services+=("$name")
+            fi
+        else
+            # HTTP 健康检查
+            local retries=0
+            local max_retries=$((timeout / 3))
+            local healthy=false
+
+            while [ $retries -lt $max_retries ]; do
+                if curl -sf --connect-timeout 3 --max-time 5 "$url" > /dev/null 2>&1; then
+                    log_success "$name 健康检查通过"
+                    healthy=true
+                    break
+                fi
+                retries=$((retries + 1))
+                sleep 3
+            done
+
+            if [ "$healthy" = false ]; then
+                log_warning "$name 未就绪 — 请检查日志"
+                failed_services+=("$name")
+            fi
+        fi
+    done
+
+    echo ""
+
+    if [ ${#failed_services[@]} -gt 0 ]; then
+        log_warning "以下服务未通过健康检查: ${failed_services[*]}"
+        log_info "查看日志: docker-compose logs <service_name>"
+    else
+        log_success "所有服务健康检查通过！"
+    fi
 
     echo ""
     echo "访问地址:"
@@ -263,10 +385,14 @@ health_check() {
     echo "  - Grafana:       http://localhost:3000"
     echo "  - Prometheus:    http://localhost:9090"
     echo ""
-    echo "默认账号密码:"
-    echo "  - Keycloak admin: admin / ChangeMe123!"
-    echo "  - Grafana admin: admin / $(grep GRAFANA_PASSWORD $ENV_FILE | cut -d'=' -f2)"
-    echo ""
+
+    if [ -f "$ENV_FILE" ] && [ -f "$ENV_FILE" ]; then
+        local grafana_pwd=$(grep GRAFANA_PASSWORD "$ENV_FILE" 2>/dev/null | head -1 | cut -d'=' -f2)
+        echo "默认账号密码:"
+        echo "  - Keycloak admin: admin / ChangeMe123!"
+        echo "  - Grafana admin: admin / ${grafana_pwd:-<见.env文件>}"
+        echo ""
+    fi
 }
 
 # ========================================
@@ -274,8 +400,6 @@ health_check() {
 # ========================================
 create_admin() {
     log_info "创建管理员账号..."
-
-    # 这里可以通过 Keycloak API 创建初始管理员
     log_info "请在 Keycloak 控制台手动创建用户账号"
     log_info "访问: http://localhost:8080/admin"
 }
@@ -289,6 +413,12 @@ main() {
     echo "  Enterprise LLM Platform Deployment"
     echo "  企业大模型平台部署"
     echo "========================================"
+    echo ""
+    echo "参数:"
+    [ "$SKIP_MODELS" = true ] && echo "  --skip-models    是（跳过模型下载）"
+    [ "$ONLY_INFRA" = true ] && echo "  --only-infra     是（仅启动基础设施）"
+    [ "$SKIP_MODELS" = false ] && echo "  --skip-models    否"
+    [ "$ONLY_INFRA" = false ] && echo "  --only-infra     否"
     echo ""
 
     # 执行部署步骤
@@ -308,6 +438,7 @@ main() {
     echo "  3. 为用户分配角色和配额"
     echo "  4. 安装 IDE 插件并配置"
     echo ""
+    log_info "部署日志: $LOG_FILE"
 }
 
 # 执行主函数

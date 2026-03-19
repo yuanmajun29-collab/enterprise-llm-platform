@@ -14,9 +14,9 @@ router.get('/info', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     const user = await userController.getUserInfo(userId);
-    res.json(user);
+    return res.json(user);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -32,9 +32,9 @@ router.put('/info', async (req: Request, res: Response) => {
     }
     const updates = req.body;
     const user = await userController.updateUser(userId, updates);
-    res.json(user);
+    return res.json(user);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -49,9 +49,9 @@ router.get('/quota', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     const quota = await userController.getUserQuota(userId);
-    res.json(quota);
+    return res.json(quota);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -71,9 +71,9 @@ router.get('/list', async (req: Request, res: Response) => {
       sortBy: sortBy as string,
       sortOrder: sortOrder as string,
     });
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -87,9 +87,9 @@ router.put('/:id/status', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { isActive } = req.body;
     const result = await userController.updateUserStatus(adminUserId, id, isActive);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -103,9 +103,9 @@ router.put('/:id/role', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { isAdmin } = req.body;
     const result = await userController.setUserRole(adminUserId, id, isAdmin);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -119,9 +119,9 @@ router.put('/:id/quota', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { quotaType, limits } = req.body;
     const result = await userController.setUserQuota(adminUserId, id, quotaType, limits);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -134,9 +134,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
     const adminUserId = req.headers['x-user-id'] as string;
     const { id } = req.params;
     const result = await userController.deleteUser(adminUserId, id);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -147,9 +147,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.get('/departments', async (_req: Request, res: Response) => {
   try {
     const departments = await userController.getDepartments();
-    res.json({ data: departments });
+    return res.json({ data: departments });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 

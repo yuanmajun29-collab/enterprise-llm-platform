@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+
 import { logger } from '../utils/logger';
 
 /**

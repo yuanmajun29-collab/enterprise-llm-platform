@@ -239,6 +239,38 @@ services:
     networks:
       - llm-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llm_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ========================================
+  # API 服务
+  # ========================================
+  api-server:
+    build:
+      context: ../api-server
+      dockerfile: ../docker/api-server/Dockerfile
+    container_name: api-server
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DATABASE_URL=postgresql://llm_platform:${POSTGRES_PASSWORD:-llm_platform_password}@postgres:5432/llm_platform
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_password}@redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - KEYCLOAK_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=llm-platform
+    networks:
+      - llm-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
 networks:
   llm-network:

@@ -2,18 +2,18 @@
 <idea-plugin>
     <id>com.company.aiassistant</id>
     <name>Enterprise AI Assistant</name>
-    <vendor email="support@company.com" url="https://www.company.com">Company</vendor>
+    <vendor email="support@company.com" url="https://www.company.com">cqfz-ai-platform</vendor>
 
     <description><![CDATA[
         <p>企业大模型助手 - 支持 IntelliJ IDEA, PyCharm, WebStorm, GoLand 等 JetBrains IDE</p>
         <ul>
-            <li>AI 对话面板</li>
-            <li>代码补全</li>
-            <li>代码解释</li>
-            <li>代码重构</li>
-            <li>单元测试生成</li>
-            <li>Bug 检测</li>
-            <li>代码优化</li>
+            <li>🤖 AI 对话面板（支持流式输出）</li>
+            <li>✨ 智能代码补全</li>
+            <li>📖 代码解释</li>
+            <li>🔄 代码重构</li>
+            <li>🧪 单元测试生成</li>
+            <li>🐛 Bug 检测</li>
+            <li>⚡ 代码性能优化</li>
         </ul>
     ]]></description>
 
@@ -21,101 +21,108 @@
         <h3>版本 1.0.0</h3>
         <ul>
             <li>初始版本发布</li>
-            <li>支持 AI 对话功能</li>
-            <li>支持代码补全</li>
-            <li>支持代码分析功能</li>
+            <li>支持 AI 对话功能（流式/非流式）</li>
+            <li>支持智能代码补全</li>
+            <li>支持代码解释、重构、测试生成、Bug 检测、性能优化</li>
         </ul>
     ]]></change-notes>
 
+    <!-- 依赖 IntelliJ Platform -->
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- 工具窗口 -->
         <toolWindow id="AI Assistant"
                     factoryClass="com.company.aiassistant.toolwindow.AIToolWindowFactory"
-                    anchor="right"
-                    icon="AllIcons.Actions.Show"/>
+                    anchor="right"/>
 
         <!-- 代码补全提供者 -->
-        <completion.contributor language="any" implementationClass="com.company.aiassistant.completion.AICompletionContributor"/>
+        <completion.contributor language="any"
+                                implementationClass="com.company.aiassistant.completion.AICompletionContributor"
+                                order="last"/>
 
-        <!-- 编辑器上下文菜单 -->
-        <action id="ai.explainCode"
-                 class="com.company.aiassistant.actions.ExplainCodeAction"
-                 text="AI 解释代码"
-                 description="使用 AI 解释选中的代码">
-            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
-        </action>
-
-        <action id="ai.refactorCode"
-                 class="com.company.aiassistant.actions.RefactorCodeAction"
-                 text="AI 重构代码"
-                 description="使用 AI 重构选中的代码">
-            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.explainCode"/>
-        </action>
-
-        <action id="ai.generateTests"
-                 class="com.company.aiassistant.actions.GenerateTestsAction"
-                 text="AI 生成测试"
-                 description="使用 AI 生成单元测试">
-            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.refactorCode"/>
-        </action>
-
-        <action id="ai.optimizeCode"
-                 class="com.company.aiassistant.actions.OptimizeCodeAction"
-                 text="AI 优化代码"
-                 description="使用 AI 优化代码">
-            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.generateTests"/>
-        </action>
-
-        <action id="ai.findBugs"
-                 class="com.company.aiassistant.actions.FindBugsAction"
-                 text="AI 查找问题"
-                 description="使用 AI 查找代码中的问题">
-            <add-to-group group-id="EditorPopupMenu" anchor="after" relative-to-action="ai.optimizeCode"/>
-        </action>
-
-        <!-- 主菜单 -->
-        <action id="ai.chat"
-                 class="com.company.aiassistant.actions.OpenChatAction"
-                 text="AI 对话"
-                 description="打开 AI 对话面板">
-            <add-to-group group-id="ToolsMenu" anchor="first"/>
-            <keyboard-shortcut first-keystroke="control shift A" keymap="$default"/>
-        </action>
-
-        <action id="ai.settings"
-                 class="com.company.aiassistant.actions.OpenSettingsAction"
-                 text="AI 设置"
-                 description="打开 AI 助手设置">
-            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="ai.chat"/>
-        </action>
-
-        <!-- 配置 -->
+        <!-- 应用级设置 -->
         <applicationConfigurable parentId="tools"
                                 instance="com.company.aiassistant.config.AIConfigurable"
                                 id="ai.assistant.config"
                                 displayName="AI Assistant"/>
 
-        <!-- 图标 -->
-        <icon value="/icons/ai_icon.png"/>
-
-        <!-- 通知 -->
+        <!-- 通知组 -->
         <notificationGroup id="AI Assistant Notifications"
-                           displayType="BALLOON"
-                           key="ai.assistant.notification"/>
+                           displayType="BALLOON"/>
     </extensions>
 
+    <!-- 编辑器右键菜单 (EditorPopupMenu) -->
     <actions>
-        <group id="ai.toolbar">
-            <action id="ai.toolbar.send"
-                     class="com.company.aiassistant.actions.SendMessageAction"
-                     text="发送"
-                     description="发送消息"/>
-            <action id="ai.toolbar.clear"
-                     class="com.company.aiassistant.actions.ClearChatAction"
-                     text="清空"
-                     description="清空对话"/>
+        <group id="ai.editor.popup" text="AI 助手" popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+
+            <action id="ai.explainCode"
+                    class="com.company.aiassistant.actions.ExplainCodeAction"
+                    text="AI 解释代码"
+                    description="使用 AI 解释选中的代码"
+                    icon="AllIcons.FileTypes.Text">
+                <keyboard-shortcut first-keystroke="control shift E" keymap="$default"/>
+            </action>
+
+            <action id="ai.refactorCode"
+                    class="com.company.aiassistant.actions.RefactorCodeAction"
+                    text="AI 重构代码"
+                    description="使用 AI 重构选中的代码"
+                    icon="AllIcons.Actions.RefactorBulb">
+                <keyboard-shortcut first-keystroke="control shift R" keymap="$default"/>
+            </action>
+
+            <separator/>
+
+            <action id="ai.generateTests"
+                    class="com.company.aiassistant.actions.GenerateTestsAction"
+                    text="AI 生成单元测试"
+                    description="使用 AI 生成单元测试"
+                    icon="AllIcons.FileTypes.Java">
+                <keyboard-shortcut first-keystroke="control shift T" keymap="$default"/>
+            </action>
+
+            <action id="ai.optimizeCode"
+                    class="com.company.aiassistant.actions.OptimizeCodeAction"
+                    text="AI 优化代码"
+                    description="使用 AI 优化代码性能"
+                    icon="AllIcons.General.TbSafe">
+                <keyboard-shortcut first-keystroke="control shift O" keymap="$default"/>
+            </action>
+
+            <action id="ai.findBugs"
+                    class="com.company.aiassistant.actions.FindBugsAction"
+                    text="AI 查找问题"
+                    description="使用 AI 查找代码中的 Bug"
+                    icon="AllIcons.General.Warning">
+                <keyboard-shortcut first-keystroke="control shift B" keymap="$default"/>
+            </action>
+        </group>
+
+        <!-- 编辑器基本菜单 (EditorBasics) -->
+        <action id="ai.explainCode.quick"
+                class="com.company.aiassistant.actions.ExplainCodeAction"
+                text="AI 解释代码"
+                description="使用 AI 解释选中的代码">
+            <add-to-group group-id="EditorBasics" anchor="after" relative-to-action="$Paste"/>
+        </action>
+
+        <!-- Tools 菜单 -->
+        <group id="ai.tools.menu" text="AI 助手" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="first"/>
+
+            <action id="ai.chat"
+                    class="com.company.aiassistant.actions.OpenChatAction"
+                    text="AI 对话"
+                    description="打开 AI 对话面板">
+                <keyboard-shortcut first-keystroke="control shift A" keymap="$default"/>
+            </action>
+
+            <action id="ai.settings"
+                    class="com.company.aiassistant.actions.OpenSettingsAction"
+                    text="AI 设置"
+                    description="打开 AI 助手设置"/>
         </group>
     </actions>
 </idea-plugin>

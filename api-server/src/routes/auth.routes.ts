@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as authController from '../controllers/auth.controller';
+import keycloakRoutes from './keycloak.routes';
 
 const router = Router();
 
@@ -14,9 +15,9 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: { message: '用户名和密码为必填项', type: 'validation_error' } });
     }
     const result = await authController.login(username, password);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -28,9 +29,9 @@ router.post('/register', async (req: Request, res: Response) => {
   try {
     const userData = req.body;
     const result = await authController.register(userData);
-    res.status(201).json(result);
+    return res.status(201).json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -42,9 +43,9 @@ router.post('/refresh', async (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body;
     const result = await authController.refreshToken(refreshToken);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -56,9 +57,9 @@ router.post('/logout', async (req: Request, res: Response) => {
   try {
     const userId = req.headers['x-user-id'] as string;
     await authController.logout(userId);
-    res.json({ message: '已成功登出' });
+    return res.json({ message: '已成功登出' });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -71,9 +72,9 @@ router.put('/password', async (req: Request, res: Response) => {
     const userId = req.headers['x-user-id'] as string;
     const { oldPassword, newPassword } = req.body;
     const result = await authController.changePassword(userId, oldPassword, newPassword);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -85,9 +86,9 @@ router.post('/reset-request', async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     const result = await authController.requestPasswordReset(email);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -99,10 +100,13 @@ router.post('/reset', async (req: Request, res: Response) => {
   try {
     const { token, newPassword } = req.body;
     const result = await authController.resetPassword(token, newPassword);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
+
+// Keycloak 认证子路由
+router.use('/keycloak', keycloakRoutes);
 
 export default router;

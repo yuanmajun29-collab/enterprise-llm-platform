@@ -22,9 +22,9 @@ router.get('/records', async (req: Request, res: Response) => {
       model: model as string,
       status: status as string,
     });
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -40,9 +40,9 @@ router.get('/daily', async (req: Request, res: Response) => {
     }
     const { days = 30 } = req.query;
     const summary = await usageController.getDailyUsage(userId, Number(days));
-    res.json({ data: summary });
+    return res.json({ data: summary });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -57,9 +57,9 @@ router.get('/today', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     const stats = await usageController.getTodayUsage(userId);
-    res.json(stats);
+    return res.json(stats);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -75,9 +75,9 @@ router.get('/stats', async (req: Request, res: Response) => {
       department: department as string,
       model: model as string,
     });
-    res.json(stats);
+    return res.json(stats);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -97,9 +97,9 @@ router.get('/all', async (req: Request, res: Response) => {
       status: status as string,
       userId: userId as string,
     });
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 

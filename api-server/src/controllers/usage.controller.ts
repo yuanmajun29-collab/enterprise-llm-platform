@@ -145,7 +145,7 @@ export async function recordUsage(usageData: any) {
  * 管理员：获取全局使用统计
  */
 export async function getGlobalUsageStats(options?: any) {
-  const { days = 30, department, model } = options || {};
+  const { days = 30, model } = options || {};
 
   // 总览统计
   const overview = await queryOne(`

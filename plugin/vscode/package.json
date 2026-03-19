@@ -1,9 +1,9 @@
 {
   "name": "enterprise-llm-assistant",
   "displayName": "Enterprise LLM Assistant",
-  "description": "企业大模型助手 - 支持代码补全、对话、重构等功能",
+  "description": "企业大模型助手 - 支持代码补全、对话、重构、测试生成等功能",
   "version": "1.0.0",
-  "publisher": "company",
+  "publisher": "cqfz-ai-platform",
   "license": "MIT",
   "engines": {
     "vscode": "^1.80.0"
@@ -22,277 +22,246 @@
     "enterprise"
   ],
   "activationEvents": [
-    "onCommand:llm.startChat",
-    "onCommand:llm.codeComplete",
-    "onCommand:llm.explainCode",
-    "onCommand:llm.refactorCode",
+    "onCommand:llm-assistant.login",
+    "onCommand:llm-assistant.logout",
+    "onCommand:llm-assistant.openChat",
+    "onCommand:llm-assistant.explainCode",
+    "onCommand:llm-assistant.refactorCode",
+    "onCommand:llm-assistant.generateTests",
+    "onCommand:llm-assistant.findBugs",
+    "onCommand:llm-assistant.optimizeCode",
     "onLanguage:*"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "llm.startChat",
-        "title": "开启 AI 对话",
-        "icon": "$(comment-discussion)",
-        "enablement": "!inChatMode"
+        "command": "llm-assistant.login",
+        "title": "LLM 助手: 登录",
+        "icon": "$(sign-in)"
       },
       {
-        "command": "llm.codeComplete",
-        "title": "AI 代码补全",
-        "icon": "$(lightbulb)",
-        "enablement": "!inChatMode"
+        "command": "llm-assistant.logout",
+        "title": "LLM 助手: 登出",
+        "icon": "$(sign-out)"
       },
       {
-        "command": "llm.explainCode",
-        "title": "解释选中的代码",
+        "command": "llm-assistant.openChat",
+        "title": "LLM 助手: 打开 AI 对话",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "llm-assistant.explainCode",
+        "title": "LLM 助手: 解释代码",
         "icon": "$(book)"
       },
       {
-        "command": "llm.refactorCode",
-        "title": "重构代码",
+        "command": "llm-assistant.refactorCode",
+        "title": "LLM 助手: 重构代码",
         "icon": "$(symbol-misc)"
       },
       {
-        "command": "llm.addTests",
-        "title": "生成单元测试",
+        "command": "llm-assistant.generateTests",
+        "title": "LLM 助手: 生成单元测试",
         "icon": "$(beaker)"
       },
       {
-        "command": "llm.optimizeCode",
-        "title": "优化代码",
-        "icon": "$(zap)"
-      },
-      {
-        "command": "llm.findBugs",
-        "title": "查找代码问题",
+        "command": "llm-assistant.findBugs",
+        "title": "LLM 助手: 查找代码问题",
         "icon": "$(warning)"
       },
       {
-        "command": "llm.clearChat",
-        "title": "清空对话历史",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "llm.exportChat",
-        "title": "导出对话",
-        "icon": "$(save)"
-      },
-      {
-        "command": "llm.settings.configure",
-        "title": "配置 LLM 设置",
-        "icon": "$(settings-gear)"
+        "command": "llm-assistant.optimizeCode",
+        "title": "LLM 助手: 优化代码性能",
+        "icon": "$(zap)"
       }
     ],
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "llm-activitybar",
-          "title": "AI 助手",
-          "icon": "resources/icon.svg"
-        }
-      ]
-    },
-    "views": {
-      "llm-activitybar": [
-        {
-          "type": "webview",
-          "id": "llm.chatView",
-          "name": "AI 对话",
-          "icon": "$(comment-discussion)",
-          "contextualTitle": "AI 对话"
-        },
-        {
-          "type": "tree",
-          "id": "llm.historyView",
-          "name": "历史对话",
-          "icon": "$(history)"
-        },
-        {
-          "type": "tree",
-          "id": "llm.modelsView",
-          "name": "可用模型",
-          "icon": "$(package)"
-        }
-      ]
-    },
     "keybindings": [
       {
-        "command": "llm.startChat",
-        "key": "ctrl+alt+a",
-        "mac": "cmd+alt+a"
+        "command": "llm-assistant.login",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "!inChatMode"
       },
       {
-        "command": "llm.codeComplete",
-        "key": "ctrl+alt+space",
-        "mac": "cmd+alt+space"
+        "command": "llm-assistant.openChat",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "!inChatMode"
       },
       {
-        "command": "llm.explainCode",
-        "key": "ctrl+alt+e",
-        "mac": "cmd+alt+e"
+        "command": "llm-assistant.explainCode",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
       },
       {
-        "command": "llm.refactorCode",
-        "key": "ctrl+alt+r",
-        "mac": "cmd+alt+r"
+        "command": "llm-assistant.refactorCode",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r",
+        "when": "editorHasSelection"
       },
       {
-        "command": "llm.addTests",
-        "key": "ctrl+alt+t",
-        "mac": "cmd+alt+t"
+        "command": "llm-assistant.generateTests",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "editorHasSelection"
       },
       {
-        "command": "llm.optimizeCode",
-        "key": "ctrl+alt+o",
-        "mac": "cmd+alt+o"
+        "command": "llm-assistant.findBugs",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "editorHasSelection"
       },
       {
-        "command": "llm.findBugs",
-        "key": "ctrl+alt+b",
-        "mac": "cmd+alt+b"
+        "command": "llm-assistant.optimizeCode",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "editorHasSelection"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "submenu": "llm.submenu",
+          "submenu": "llm-assistant.submenu",
           "group": "llm",
           "label": "AI 助手"
         }
       ],
-      "llm.submenu": [
+      "llm-assistant.submenu": [
         {
-          "command": "llm.explainCode",
+          "command": "llm-assistant.explainCode",
           "group": "1_analysis",
           "when": "editorHasSelection"
         },
         {
-          "command": "llm.refactorCode",
+          "command": "llm-assistant.refactorCode",
           "group": "1_analysis",
           "when": "editorHasSelection"
         },
         {
-          "command": "llm.addTests",
-          "group": "2_generation"
+          "command": "llm-assistant.generateTests",
+          "group": "2_generation",
+          "when": "editorHasSelection"
         },
         {
-          "command": "llm.optimizeCode",
-          "group": "2_generation"
+          "command": "llm-assistant.optimizeCode",
+          "group": "2_generation",
+          "when": "editorHasSelection"
         },
         {
-          "command": "llm.findBugs",
-          "group": "3_analysis"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "llm.startChat",
-          "when": "view == llm.chatView",
-          "group": "navigation"
-        },
-        {
-          "command": "llm.clearChat",
-          "when": "view == llm.chatView",
-          "group": "navigation"
+          "command": "llm-assistant.findBugs",
+          "group": "3_analysis",
+          "when": "editorHasSelection"
         }
       ],
       "commandPalette": [
         {
-          "command": "llm.startChat"
+          "command": "llm-assistant.login"
         },
         {
-          "command": "llm.codeComplete"
+          "command": "llm-assistant.logout"
         },
         {
-          "command": "llm.explainCode",
+          "command": "llm-assistant.openChat"
+        },
+        {
+          "command": "llm-assistant.explainCode",
           "when": "editorHasSelection"
         },
         {
-          "command": "llm.refactorCode",
+          "command": "llm-assistant.refactorCode",
           "when": "editorHasSelection"
         },
         {
-          "command": "llm.addTests"
+          "command": "llm-assistant.generateTests",
+          "when": "editorHasSelection"
         },
         {
-          "command": "llm.optimizeCode"
+          "command": "llm-assistant.findBugs",
+          "when": "editorHasSelection"
         },
         {
-          "command": "llm.findBugs"
+          "command": "llm-assistant.optimizeCode",
+          "when": "editorHasSelection"
         }
       ]
     },
     "configuration": {
       "title": "Enterprise LLM Assistant",
       "properties": {
-        "llm.apiUrl": {
+        "llm-assistant.apiUrl": {
           "type": "string",
-          "default": "https://api.company.com",
-          "description": "LLM API 服务地址"
+          "default": "http://localhost:8443",
+          "description": "LLM API 服务地址",
+          "order": 1
         },
-        "llm.apiKey": {
+        "llm-assistant.authMode": {
           "type": "string",
-          "description": "API 密钥 (留空则使用 OAuth 认证)"
+          "enum": ["token", "oauth"],
+          "default": "token",
+          "description": "认证模式: token (API Key) 或 oauth (OAuth2 登录)",
+          "order": 2
         },
-        "llm.model": {
+        "llm-assistant.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API 密钥（token 模式使用）",
+          "order": 3
+        },
+        "llm-assistant.defaultModel": {
           "type": "string",
           "default": "Qwen-72B-Chat",
-          "description": "默认使用的模型"
+          "enum": [
+            "Qwen-72B-Chat",
+            "Qwen-14B-Chat",
+            "DeepSeek-Coder-33B",
+            "Llama-3-70B-Instruct"
+          ],
+          "description": "默认使用的模型",
+          "order": 4
         },
-        "llm.temperature": {
+        "llm-assistant.maxTokens": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1,
+          "maximum": 8192,
+          "description": "最大生成 Token 数",
+          "order": 5
+        },
+        "llm-assistant.temperature": {
           "type": "number",
           "default": 0.7,
           "minimum": 0,
           "maximum": 2,
-          "description": "生成温度 (0-2)"
+          "description": "生成温度 (0-2)",
+          "order": 6
         },
-        "llm.maxTokens": {
-          "type": "number",
-          "default": 2048,
-          "minimum": 1,
-          "maximum": 8192,
-          "description": "最大生成 Token 数"
-        },
-        "llm.enableStream": {
+        "llm-assistant.enableStream": {
           "type": "boolean",
           "default": true,
-          "description": "启用流式响应"
+          "description": "启用流式响应",
+          "order": 7
         },
-        "llm.enableAutocomplete": {
+        "llm-assistant.enableAutocomplete": {
           "type": "boolean",
           "default": true,
-          "description": "启用自动代码补全"
+          "description": "启用自动代码补全",
+          "order": 8
         },
-        "llm.autocompleteDebounce": {
+        "llm-assistant.autocompleteDebounce": {
           "type": "number",
-          "default": 300,
+          "default": 500,
           "minimum": 100,
           "maximum": 2000,
-          "description": "自动补全防抖延迟 (毫秒)"
+          "description": "自动补全防抖延迟 (毫秒)",
+          "order": 9
         },
-        "llm.systemPrompt": {
+        "llm-assistant.systemPrompt": {
           "type": "string",
           "default": "你是一个专业的编程助手，擅长代码编写、重构和问题解决。",
-          "description": "系统提示词"
-        },
-        "llm.proxyUrl": {
-          "type": "string",
-          "description": "代理服务器地址"
-        },
-        "llm.enableTelemetry": {
-          "type": "boolean",
-          "default": false,
-          "description": "启用遥测数据收集"
-        }
-      }
-    },
-    "icons": {
-      "llm-icon": {
-        "description": "LLM Icon",
-        "default": {
-          "fontPath": "resources/icon.woff",
-          "fontCharacter": "\\E001"
+          "description": "系统提示词",
+          "order": 10
         }
       }
     }
@@ -301,9 +270,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -313,12 +280,9 @@
     "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.50.0",
     "typescript": "^5.2.0",
-    "@vscode/test-electron": "^2.3.0",
     "@vscode/vsce": "^2.20.0"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "jsonwebtoken": "^9.0.2",
-    "eventsource-parser": "^1.1.1"
+    "axios": "^1.6.0"
   }
 }

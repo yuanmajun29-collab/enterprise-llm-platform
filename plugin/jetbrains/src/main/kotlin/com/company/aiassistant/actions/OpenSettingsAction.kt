@@ -9,10 +9,7 @@ import com.intellij.openapi.options.ShowSettingsUtil
  */
 class OpenSettingsAction : AnAction("AI 设置", "打开 AI 助手设置", null) {
     override fun actionPerformed(e: AnActionEvent) {
-        ShowSettingsUtil.getInstance().showSettingsDialog(
-            e.project,
-            "AI Assistant"
-        )
+        ShowSettingsUtil.getInstance().showSettingsDialog(e.project, "AI Assistant")
     }
 
     override fun update(e: AnActionEvent) {

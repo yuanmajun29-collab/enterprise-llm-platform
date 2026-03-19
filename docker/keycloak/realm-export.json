@@ -35,6 +35,7 @@
       }
     ]
   },
+  "defaultRoles": ["user"],
   "users": [
     {
       "username": "admin",
@@ -51,14 +52,121 @@
         }
       ],
       "realmRoles": [
-        "admin"
+        "admin",
+        "user"
+      ],
+      "attributes": {
+        "department": ["技术部"],
+        "position": ["系统管理员"],
+        "employee_id": ["EMP001"]
+      }
+    },
+    {
+      "username": "developer",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "developer@company.com",
+      "firstName": "开发",
+      "lastName": "人员",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "developer",
+        "user"
+      ],
+      "attributes": {
+        "department": ["研发部"],
+        "position": ["开发工程师"],
+        "employee_id": ["EMP002"]
+      }
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "llm-scope",
+      "description": "LLM Platform 自定义 claims，包含部门、职位、工号等信息",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "department",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "department",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "department",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "position",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "position",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "position",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "employee_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "employee_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "employee_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "realm_roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.realm.role.mapping": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_roles",
+            "multivalued": "true"
+          }
+        }
       ]
     }
+  ],
+  "defaultDefaultClientScopes": [
+    "profile",
+    "email",
+    "roles",
+    "web-origins",
+    "llm-scope"
   ],
   "clients": [
     {
       "clientId": "llm-api",
       "name": "LLM Platform API",
+      "description": "企业大模型平台 API 客户端",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
       "secret": "${LLM_API_SECRET}",
@@ -80,8 +188,21 @@
       "protocol": "openid-connect",
       "attributes": {
         "access.token.lifespan": "3600",
-        "client.session.idle.timeout": "1800"
+        "client.session.idle.timeout": "1800",
+        "oauth2.device.authorization.grant.enabled": "false"
       },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins",
+        "llm-scope"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ],
       "protocolMappers": [
         {
           "name": "department",
@@ -98,6 +219,20 @@
           }
         },
         {
+          "name": "position",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "position",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "position",
+            "jsonType.label": "String"
+          }
+        },
+        {
           "name": "employee_id",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-usermodel-attribute-mapper",
@@ -108,6 +243,32 @@
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "employee_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "Client Host",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "clientHost",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "clientHost",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "Client IP Address",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "clientAddress",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "clientAddress",
             "jsonType.label": "String"
           }
         }
@@ -131,7 +292,13 @@
       "protocol": "openid-connect",
       "attributes": {
         "access.token.lifespan": "7200"
-      }
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ]
     },
     {
       "clientId": "jetbrains-plugin",
@@ -150,7 +317,13 @@
       "protocol": "openid-connect",
       "attributes": {
         "access.token.lifespan": "7200"
-      }
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles",
+        "web-origins"
+      ]
     }
   ],
   "browserSecurityHeaders": {

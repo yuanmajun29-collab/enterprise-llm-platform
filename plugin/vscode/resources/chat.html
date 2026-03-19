@@ -1,4 +1,6 @@
-<!-- Enterprise LLM Assistant - Chat UI -->
+<!-- Enterprise LLM Assistant - Chat UI (Standalone HTML)
+     注意：此文件仅作为独立的聊天界面模板备用。
+     实际 Webview HTML 由 ChatPanelView 内联生成。 -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -11,35 +13,26 @@
         img-src https: data:;
     ">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             font-size: 14px;
             line-height: 1.6;
-            color: #333;
-            background: #f5f5f5;
-        }
-
-        .container {
+            color: var(--vscode-editor-foreground, #ccc);
+            background: var(--vscode-editor-background, #1e1e1e);
+            height: 100vh;
             display: flex;
             flex-direction: column;
-            height: 100vh;
-            max-width: 100%;
         }
 
+        /* 头部 */
         .header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 16px;
-            background: white;
-            border-bottom: 1px solid #e0e0e0;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--vscode-panel-border, #444);
         }
 
         .model-selector {
@@ -49,443 +42,392 @@
         }
 
         .model-selector label {
-            font-size: 13px;
-            color: #666;
+            font-size: 12px;
+            opacity: 0.7;
         }
 
         .model-selector select {
-            padding: 6px 12px;
-            border: 1px solid #d0d0d0;
-            border-radius: 6px;
-            font-size: 13px;
-            background: white;
+            padding: 4px 8px;
+            border: 1px solid var(--vscode-input-border, #555);
+            border-radius: 4px;
+            background: var(--vscode-input-background, #313131);
+            color: inherit;
+            font-size: 12px;
             cursor: pointer;
         }
 
-        .model-selector select:hover {
-            border-color: #999;
-        }
-
-        .model-selector select:focus {
-            outline: none;
-            border-color: #007acc;
-        }
-
-        .actions {
-            display: flex;
-            gap: 8px;
-        }
+        .actions { display: flex; gap: 4px; }
 
         .icon-btn {
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 32px;
-            height: 32px;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            background: white;
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--vscode-panel-border, #444);
+            border-radius: 4px;
+            background: transparent;
+            color: inherit;
             cursor: pointer;
-            color: #666;
-            transition: all 0.2s;
+            transition: background 0.2s;
         }
+        .icon-btn:hover { background: var(--vscode-button-hoverBackground, #2a2d2e); }
 
-        .icon-btn:hover {
-            background: #f0f0f0;
-            color: #333;
-            border-color: #c0c0c0;
-        }
-
-        .icon-btn:active {
-            background: #e0e0e0;
-        }
-
-        .icon-btn svg {
-            width: 16px;
-            height: 16px;
-        }
-
+        /* 消息区域 */
         .messages {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
-            background: #fafafa;
+            padding: 16px;
         }
 
         .message {
             display: flex;
-            margin-bottom: 20px;
-            animation: fadeIn 0.3s ease-in;
+            margin-bottom: 16px;
+            animation: fadeIn 0.2s ease;
         }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .message.user {
-            justify-content: flex-end;
-        }
-
-        .message.assistant {
-            justify-content: flex-start;
-        }
-
-        .message.system {
-            justify-content: center;
-        }
+        .message.user { justify-content: flex-end; }
+        .message.assistant { justify-content: flex-start; }
 
         .message-bubble {
-            max-width: 70%;
-            padding: 12px 16px;
-            border-radius: 12px;
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 8px;
             word-wrap: break-word;
+            line-height: 1.6;
         }
 
         .message.user .message-bubble {
-            background: #007acc;
+            background: var(--vscode-button-background, #0e639c);
             color: white;
-            border-bottom-right-radius: 4px;
+            border-bottom-right-radius: 2px;
         }
 
         .message.assistant .message-bubble {
-            background: white;
-            color: #333;
-            border-bottom-left-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            background: var(--vscode-input-background, #313131);
+            border: 1px solid var(--vscode-panel-border, #444);
+            border-bottom-left-radius: 2px;
         }
 
-        .message.system .message-bubble {
-            background: #f0f0f0;
-            color: #666;
-            font-size: 12px;
-            padding: 8px 16px;
-            border-radius: 20px;
+        .message-bubble pre {
+            background: rgba(0,0,0,0.2);
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 8px 0;
+            font-size: 13px;
         }
+        .message-bubble code {
+            font-family: var(--vscode-editor-font-family, monospace);
+            font-size: 13px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: rgba(0,0,0,0.15);
+        }
+        .message-bubble pre code { background: none; padding: 0; }
+        .message-bubble strong { font-weight: 600; }
 
         .message-meta {
             font-size: 11px;
-            color: #999;
+            opacity: 0.5;
             margin-top: 4px;
         }
 
-        .message.assistant .message-meta {
-            text-align: left;
+        .typing-cursor::after {
+            content: '▊';
+            animation: blink 1s infinite;
+            color: var(--vscode-button-background, #0e639c);
         }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 
-        .message.user .message-meta {
-            text-align: right;
+        /* 空状态 */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            opacity: 0.5;
+            text-align: center;
         }
+        .empty-state h3 { margin-bottom: 8px; font-size: 18px; }
+        .empty-state p { font-size: 13px; }
 
+        /* 输入区域 */
         .input-area {
             display: flex;
-            gap: 12px;
-            padding: 16px;
-            background: white;
-            border-top: 1px solid #e0e0e0;
+            gap: 8px;
+            padding: 12px;
+            border-top: 1px solid var(--vscode-panel-border, #444);
         }
 
         #message-input {
             flex: 1;
-            padding: 12px 16px;
-            border: 1px solid #d0d0d0;
-            border-radius: 8px;
+            padding: 8px 12px;
+            border: 1px solid var(--vscode-input-border, #555);
+            border-radius: 6px;
+            background: var(--vscode-input-background, #313131);
+            color: inherit;
             font-family: inherit;
-            font-size: 14px;
+            font-size: 13px;
             resize: none;
-            min-height: 48px;
+            min-height: 40px;
             max-height: 120px;
-            line-height: 1.5;
         }
+        #message-input:focus { outline: none; border-color: var(--vscode-button-background, #0e639c); }
+        #message-input::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
 
-        #message-input:focus {
-            outline: none;
-            border-color: #007acc;
-        }
-
-        #message-input::placeholder {
-            color: #999;
-        }
-
-        #send-btn {
-            padding: 12px 24px;
-            background: #007acc;
-            color: white;
+        .btn {
+            padding: 8px 16px;
             border: none;
-            border-radius: 8px;
+            border-radius: 6px;
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
-            transition: all 0.2s;
+            color: white;
         }
 
-        #send-btn:hover:not(:disabled) {
-            background: #005a9e;
-        }
+        .btn-send { background: var(--vscode-button-background, #0e639c); }
+        .btn-send:hover:not(:disabled) { opacity: 0.9; }
+        .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        #send-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .generating {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #666;
-            font-size: 13px;
-        }
-
-        .generating::before {
-            content: '';
-            width: 12px;
-            height: 12px;
-            border: 2px solid #007acc;
-            border-top-color: transparent;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .typing-indicator {
-            display: flex;
-            gap: 4px;
-            padding: 8px;
-        }
-
-        .typing-indicator span {
-            width: 8px;
-            height: 8px;
-            background: #999;
-            border-radius: 50%;
-            animation: typing 1.4s infinite;
-        }
-
-        .typing-indicator span:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        .typing-indicator span:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-
-        @keyframes typing {
-            0%, 60%, 100% { transform: translateY(0); }
-            30% { transform: translateY(-8px); }
-        }
+        .btn-stop { background: #d32f2f; display: none; }
+        .btn-stop:hover { opacity: 0.9; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="model-selector">
-                <label for="model-select">模型:</label>
-                <select id="model-select">
-                    <option value="Qwen-72B-Chat">Qwen 72B Chat</option>
-                    <option value="Qwen-14B-Chat">Qwen 14B Chat</option>
-                    <option value="DeepSeek-Coder-33B">DeepSeek Coder 33B</option>
-                    <option value="Llama-3-70B-Instruct">Llama 3 70B</option>
-                </select>
-            </div>
-            <div class="actions">
-                <button id="clear-btn" title="清空对话" class="icon-btn">
-                    <svg width="16" height="16" viewBox="0 0 16 16">
-                        <path fill="currentColor" d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-                    </svg>
-                </button>
-                <button id="export-btn" title="导出对话" class="icon-btn">
-                    <svg width="16" height="16" viewBox="0 0 16 16">
-                        <path fill="currentColor" d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
-                    </svg>
-                </button>
-            </div>
+    <!-- 头部 -->
+    <div class="header">
+        <div class="model-selector">
+            <label for="model-select">模型:</label>
+            <select id="model-select">
+                <option value="Qwen-72B-Chat">Qwen 72B Chat</option>
+                <option value="Qwen-14B-Chat">Qwen 14B Chat</option>
+                <option value="DeepSeek-Coder-33B">DeepSeek Coder 33B</option>
+                <option value="Llama-3-70B-Instruct">Llama 3 70B</option>
+            </select>
         </div>
-        <div class="messages" id="messages"></div>
-        <div class="input-area">
-            <textarea id="message-input" placeholder="输入消息... (Shift+Enter 发送)" rows="3"></textarea>
-            <button id="send-btn" disabled>发送</button>
+        <div class="actions">
+            <button id="clear-btn" class="icon-btn" title="清空对话">🗑</button>
+            <button id="export-btn" class="icon-btn" title="导出对话">💾</button>
         </div>
     </div>
 
+    <!-- 消息列表 -->
+    <div class="messages" id="messages">
+        <div class="empty-state" id="empty-state">
+            <h3>🤖 企业大模型助手</h3>
+            <p>输入消息开始对话</p>
+        </div>
+    </div>
+
+    <!-- 输入区域 -->
+    <div class="input-area">
+        <textarea id="message-input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" rows="2"></textarea>
+        <button id="send-btn" class="btn btn-send" disabled>发送</button>
+        <button id="stop-btn" class="btn btn-stop">停止</button>
+    </div>
+
     <script>
+        // 使用 VSCode Webview API 与 extension 通信
         (function() {
             const vscode = acquireVsCodeApi();
             const messagesDiv = document.getElementById('messages');
+            const emptyState = document.getElementById('empty-state');
             const input = document.getElementById('message-input');
             const sendBtn = document.getElementById('send-btn');
+            const stopBtn = document.getElementById('stop-btn');
             const clearBtn = document.getElementById('clear-btn');
             const exportBtn = document.getElementById('export-btn');
             const modelSelect = document.getElementById('model-select');
 
-            let session = null;
             let isGenerating = false;
 
-            // 监听来自扩展的消息
+            // 监听来自 extension 的消息
             window.addEventListener('message', event => {
-                const message = event.data;
-                switch (message.type) {
+                const msg = event.data;
+                switch (msg.type) {
                     case 'init':
-                        session = message.session;
-                        renderMessages(session.messages);
-                        modelSelect.value = session.model || 'Qwen-72B-Chat';
+                        modelSelect.value = msg.session.model || 'Qwen-72B-Chat';
+                        if (msg.session.messages && msg.session.messages.length > 0) {
+                            emptyState.style.display = 'none';
+                            msg.session.messages.forEach(m => renderMessage(m));
+                        }
                         break;
+
                     case 'message':
-                        addMessage(message.message);
+                        emptyState.style.display = 'none';
+                        renderMessage(msg.message);
                         break;
-                    case 'chunk':
-                        appendChunk(message.content);
+
+                    case 'stream-update':
+                        updateStreamingMessage(msg.messageId, msg.content);
                         break;
+
+                    case 'stream-complete':
+                        finalizeStreamingMessage(msg.messageId, msg.content);
+                        break;
+
                     case 'generating':
-                        isGenerating = message.value;
+                        isGenerating = msg.value;
                         updateUI();
                         break;
+
                     case 'error':
-                        showError(message.message);
+                        showError(msg.message);
                         break;
+
                     case 'cleared':
                         messagesDiv.innerHTML = '';
+                        emptyState.style.display = 'flex';
+                        break;
+
+                    case 'history':
+                        messagesDiv.innerHTML = '';
+                        if (msg.messages.length > 0) {
+                            emptyState.style.display = 'none';
+                            msg.messages.forEach(m => renderMessage(m));
+                        } else {
+                            emptyState.style.display = 'flex';
+                        }
                         break;
                 }
             });
 
             // 渲染消息
-            function renderMessages(messages) {
-                messagesDiv.innerHTML = '';
-                messages.forEach(msg => addMessage(msg));
-            }
+            function renderMessage(message) {
+                const el = document.createElement('div');
+                el.className = 'message ' + message.type;
+                el.id = message.id;
 
-            // 添加消息
-            function addMessage(message) {
-                const messageEl = document.createElement('div');
-                messageEl.className = `message ${message.type}`;
-                
                 const bubble = document.createElement('div');
                 bubble.className = 'message-bubble';
-                
+
+                if (message.isStreaming) {
+                    bubble.classList.add('typing-cursor');
+                }
+
                 if (message.type === 'assistant') {
-                    bubble.innerHTML = formatContent(message.content);
+                    bubble.innerHTML = formatMarkdown(message.content || '');
                 } else {
                     bubble.textContent = message.content;
                 }
 
-                messageEl.appendChild(bubble);
+                el.appendChild(bubble);
 
-                if (message.type !== 'system') {
-                    const meta = document.createElement('div');
-                    meta.className = 'message-meta';
-                    meta.textContent = new Date(message.timestamp).toLocaleTimeString();
-                    messageEl.appendChild(meta);
+                const meta = document.createElement('div');
+                meta.className = 'message-meta';
+                meta.textContent = new Date(message.timestamp).toLocaleTimeString() +
+                    (message.model ? ' · ' + message.model : '');
+                el.appendChild(meta);
+
+                messagesDiv.appendChild(el);
+                scrollToBottom();
+            }
+
+            // 流式更新消息内容
+            function updateStreamingMessage(messageId, content) {
+                const el = document.getElementById(messageId);
+                if (!el) return;
+                const bubble = el.querySelector('.message-bubble');
+                if (bubble) {
+                    bubble.innerHTML = formatMarkdown(content);
+                    bubble.classList.add('typing-cursor');
                 }
-
-                messagesDiv.appendChild(messageEl);
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                scrollToBottom();
             }
 
-            // 追加流式响应
-            function appendChunk(content) {
-                const lastMessage = messagesDiv.querySelector('.message.assistant:last-child');
-                if (lastMessage) {
-                    const bubble = lastMessage.querySelector('.message-bubble');
-                    if (bubble) {
-                        bubble.innerHTML = formatContent(bubble.textContent + content);
-                        messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                    }
+            // 流式完成
+            function finalizeStreamingMessage(messageId, content) {
+                const el = document.getElementById(messageId);
+                if (!el) return;
+                const bubble = el.querySelector('.message-bubble');
+                if (bubble) {
+                    bubble.innerHTML = formatMarkdown(content);
+                    bubble.classList.remove('typing-cursor');
                 }
             }
 
-            // 格式化内容（Markdown 简化版）
-            function formatContent(content) {
-                // 代码块
-                content = content.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-                // 行内代码
-                content = content.replace(/`([^`]+)`/g, '<code>$1</code>');
-                // 加粗
-                content = content.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-                // 换行
-                content = content.replace(/\n/g, '<br>');
-                return content;
+            // 简易 Markdown 格式化
+            function formatMarkdown(text) {
+                if (!text) return '';
+                text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+                text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+                text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+                text = text.replace(/\n/g, '<br>');
+                return text;
             }
 
-            // 显示错误
-            function showError(message) {
-                const errorEl = document.createElement('div');
-                errorEl.style.cssText = 'padding: 12px; background: #fee; border-radius: 8px; margin-bottom: 16px; color: #c33;';
-                errorEl.textContent = `❌ ${message}`;
-                messagesDiv.appendChild(errorEl);
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            function showError(errorMsg) {
+                const el = document.createElement('div');
+                el.className = 'message assistant';
+                const bubble = document.createElement('div');
+                bubble.className = 'message-bubble';
+                bubble.style.color = '#f44336';
+                bubble.textContent = '❌ ' + errorMsg;
+                el.appendChild(bubble);
+                messagesDiv.appendChild(el);
+                scrollToBottom();
             }
 
-            // 更新 UI
             function updateUI() {
-                sendBtn.disabled = isGenerating || !input.value.trim();
-                if (isGenerating) {
-                    sendBtn.textContent = '生成中...';
-                    sendBtn.classList.add('generating');
-                } else {
-                    sendBtn.textContent = '发送';
-                    sendBtn.classList.remove('generating');
-                }
+                sendBtn.style.display = isGenerating ? 'none' : '';
+                stopBtn.style.display = isGenerating ? '' : 'none';
+                sendBtn.disabled = !input.value.trim();
             }
 
-            // 发送消息
             function sendMessage() {
                 const content = input.value.trim();
-                if (!content || isGenerating) {
-                    return;
-                }
+                if (!content || isGenerating) return;
 
-                vscode.postMessage({
-                    type: 'sendMessage',
-                    content: content
-                });
-
+                vscode.postMessage({ type: 'sendMessage', content: content });
                 input.value = '';
-                input.style.height = '48px';
+                input.style.height = 'auto';
                 updateUI();
             }
 
-            // 清空对话
-            clearBtn.addEventListener('click', () => {
-                vscode.postMessage({ type: 'clear' });
+            // 事件绑定
+            sendBtn.addEventListener('click', sendMessage);
+
+            stopBtn.addEventListener('click', () => {
+                vscode.postMessage({ type: 'stopGeneration' });
             });
 
-            // 导出对话
+            clearBtn.addEventListener('click', () => {
+                if (confirm('确定要清空所有对话吗？')) {
+                    vscode.postMessage({ type: 'clearHistory' });
+                }
+            });
+
             exportBtn.addEventListener('click', () => {
                 vscode.postMessage({ type: 'export' });
             });
 
-            // 模型选择
             modelSelect.addEventListener('change', () => {
-                vscode.postMessage({
-                    type: 'modelChange',
-                    model: modelSelect.value
-                });
+                vscode.postMessage({ type: 'modelChange', model: modelSelect.value });
             });
 
-            // 输入事件
             input.addEventListener('input', () => {
                 updateUI();
+                input.style.height = 'auto';
+                input.style.height = Math.min(input.scrollHeight, 120) + 'px';
             });
 
-            // 键盘事件
-            input.addEventListener('keydown', event => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
+            input.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
                     sendMessage();
                 }
-                // 自动调整高度
-                if (event.key === 'Enter' && event.shiftKey) {
-                    input.style.height = input.scrollHeight + 'px';
-                }
             });
 
-            // 发送按钮
-            sendBtn.addEventListener('click', sendMessage);
-
-            // 聚焦输入
             input.focus();
+            updateUI();
+
+            function scrollToBottom() {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
         })();
     </script>
 </body>

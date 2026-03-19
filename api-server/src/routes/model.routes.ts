@@ -7,12 +7,12 @@ const router = Router();
  * 获取所有模型（管理员，包含已禁用）
  * GET /api/models
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
   try {
     const models = await modelController.getAllModels();
-    res.json({ data: models });
+    return res.json({ data: models });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -23,9 +23,9 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/available', async (_req: Request, res: Response) => {
   try {
     const models = await modelController.getAvailableModels();
-    res.json({ data: models });
+    return res.json({ data: models });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -37,9 +37,9 @@ router.get('/usage', async (req: Request, res: Response) => {
   try {
     const { modelId } = req.query;
     const stats = await modelController.getModelUsageStats(modelId as string);
-    res.json({ data: stats });
+    return res.json({ data: stats });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -51,9 +51,9 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const model = await modelController.getModelById(id);
-    res.json(model);
+    return res.json(model);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -65,9 +65,9 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const modelData = req.body;
     const model = await modelController.createModel(modelData);
-    res.status(201).json(model);
+    return res.status(201).json(model);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -80,9 +80,9 @@ router.put('/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const updates = req.body;
     const model = await modelController.updateModel(id, updates);
-    res.json(model);
+    return res.json(model);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -94,9 +94,9 @@ router.patch('/:id/toggle', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const model = await modelController.toggleModelStatus(id);
-    res.json(model);
+    return res.json(model);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -108,9 +108,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const result = await modelController.deleteModel(id);
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 

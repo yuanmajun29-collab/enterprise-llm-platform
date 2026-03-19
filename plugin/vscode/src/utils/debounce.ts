@@ -26,59 +26,34 @@ export function debounce<T extends (...args: any[]) => any>(
 }
 
 /**
- * 可取消的防抖函数
- */
-export function debounceWithCancel<T extends (...args: any[]) => any>(
-    func: T,
-    wait: number
-): {
-    fn: (...args: Parameters<T>) => void;
-    cancel: () => void;
-} {
-    let timeout: NodeJS.Timeout | null = null;
-
-    const fn = (...args: Parameters<T>) => {
-        const later = () => {
-            timeout = null;
-            func(...args);
-        };
-
-        if (timeout) {
-            clearTimeout(timeout);
-        }
-        timeout = setTimeout(later, wait);
-    };
-
-    const cancel = () => {
-        if (timeout) {
-            clearTimeout(timeout);
-            timeout = null;
-        }
-    };
-
-    return { fn, cancel };
-}
-
-/**
  * 异步防抖函数
+ * 返回 { fn, cancel } 对象
  */
 export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
     func: T,
     wait: number
 ): {
-    fn: (...args: Parameters<T>) => Promise<ReturnType<T>>;
+    (...args: Parameters<T>): Promise<ReturnType<T>>;
     cancel: () => void;
 } {
     let timeout: NodeJS.Timeout | null = null;
-    let currentPromise: Promise<ReturnType<T>> | null = null;
+    let currentRejector: ((reason?: any) => void) | null = null;
 
-    const fn = (...args: Parameters<T>): Promise<ReturnType<T>> => {
-        return new Promise((resolve, reject) => {
-            if (timeout) {
-                clearTimeout(timeout);
+    const debouncedFn = (...args: Parameters<T>): Promise<ReturnType<T>> => {
+        // 取消之前的请求
+        if (timeout !== null) {
+            clearTimeout(timeout);
+            if (currentRejector) {
+                currentRejector(new Error('Debounced: cancelled'));
             }
+        }
+
+        return new Promise<ReturnType<T>>((resolve, reject) => {
+            currentRejector = reject;
 
             timeout = setTimeout(async () => {
+                timeout = null;
+                currentRejector = null;
                 try {
                     const result = await func(...args);
                     resolve(result);
@@ -89,15 +64,18 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
         });
     };
 
-    const cancel = () => {
-        if (timeout) {
+    debouncedFn.cancel = () => {
+        if (timeout !== null) {
             clearTimeout(timeout);
             timeout = null;
         }
-        currentPromise = null;
+        if (currentRejector) {
+            currentRejector(new Error('Debounced: cancelled'));
+            currentRejector = null;
+        }
     };
 
-    return { fn, cancel };
+    return debouncedFn;
 }
 
 /**

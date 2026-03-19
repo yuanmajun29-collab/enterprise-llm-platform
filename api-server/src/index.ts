@@ -1,10 +1,10 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { createClient } from 'redis';
 import { Pool } from 'pg';
-import { apiRoutes } from './routes';
+import apiRoutes from './routes';
 import { errorHandler, requestLogger, notFoundHandler } from './middleware';
 import { logger } from './utils/logger';
 import { setRedisClient } from './config/redis';
@@ -26,7 +26,7 @@ export const dbPool = new Pool({
 });
 
 // 测试数据库连接
-dbPool.connect((err, client, release) => {
+dbPool.connect((err, _client, release) => {
   if (err) {
     logger.error('Database connection error:', err);
   } else {
@@ -78,7 +78,7 @@ app.use(requestLogger);
 app.use('/api', apiRoutes);
 
 // 健康检查
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),

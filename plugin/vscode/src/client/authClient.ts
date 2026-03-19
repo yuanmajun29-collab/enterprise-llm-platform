@@ -1,296 +1,184 @@
 /**
  * Authentication Client
- * 认证客户端 - 支持 OAuth2/OIDC
+ * 认证客户端 - 支持用户名密码登录 / OAuth2 / Token 管理
  */
 
 import * as vscode from 'vscode';
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { EventEmitter } from 'events';
 
 /**
- * 认证配置
+ * 登录响应
  */
-export interface AuthConfig {
-    authUrl: string;
-    clientId: string;
-    clientSecret?: string;
-    redirectUri: string;
-    scope: string[];
-}
-
-/**
- * Token 响应
- */
-export interface TokenResponse {
+export interface LoginResponse {
     access_token: string;
     refresh_token?: string;
     token_type: string;
     expires_in: number;
-    refresh_token_expires_in?: number;
-    scope?: string;
+    username: string;
+    email?: string;
 }
 
 /**
- * 用户信息
+ * 注册响应
  */
-export interface AuthUserInfo {
+export interface RegisterResponse {
+    message: string;
+    user_id: string;
+}
+
+/**
+ * JWT Payload（解码后的部分信息）
+ */
+interface JWTPayload {
     sub: string;
-    name: string;
-    email: string;
-    department?: string;
-    employee_id?: string;
-    roles: string[];
+    username: string;
+    email?: string;
+    exp: number;
+    iat: number;
+    roles?: string[];
 }
 
 /**
  * 认证客户端类
+ *
+ * 提供登录、注册、登出、Token 刷新、密码修改等功能。
+ * Token 使用 VSCode SecretStorage 安全存储。
  */
 export class AuthClient extends EventEmitter {
-    private config: AuthConfig;
-    private accessToken: string = '';
-    private refreshToken: string = '';
-    private userInfo: AuthUserInfo | null = null;
+    private secretStorage: vscode.SecretStorage;
+    private apiClient: AxiosInstance;
+    private currentToken: string = '';
+    private currentRefreshToken: string = '';
     private tokenExpiry: number = 0;
     private refreshTimer: NodeJS.Timeout | null = null;
+    private authUrl: string;
 
-    constructor(config: AuthConfig) {
+    constructor(context: vscode.ExtensionContext) {
         super();
-        this.config = config;
+        this.secretStorage = context.secrets;
+
+        // 从配置读取 API 基础 URL
+        const config = vscode.workspace.getConfiguration('llm-assistant');
+        this.authUrl = config.get<string>('apiUrl', 'http://localhost:8443');
+
+        // 创建 HTTP 客户端
+        this.apiClient = axios.create({
+            baseURL: this.authUrl,
+            timeout: 15000,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
     }
 
+    // ==================== 认证操作 ====================
+
     /**
-     * 获取授权 URL
+     * 用户名密码登录
+     * POST /api/auth/login
      */
-    getAuthUrl(state?: string): string {
-        const params = new URLSearchParams({
-            response_type: 'code',
-            client_id: this.config.clientId,
-            redirect_uri: this.config.redirectUri,
-            scope: this.config.scope.join(' '),
-            state: state || this.generateState(),
+    async login(username: string, password: string): Promise<LoginResponse> {
+        const response = await this.apiClient.post<LoginResponse>('/api/auth/login', {
+            username,
+            password,
         });
 
-        return `${this.config.authUrl}/authorize?${params.toString()}`;
+        await this.handleTokenResponse(response.data);
+        return response.data;
     }
 
     /**
-     * 生成随机 state
+     * 用户注册
+     * POST /api/auth/register
      */
-    private generateState(): string {
-        return Math.random().toString(36).substring(2, 15) +
-               Math.random().toString(36).substring(2, 15);
+    async register(username: string, email: string, password: string): Promise<RegisterResponse> {
+        const response = await this.apiClient.post<RegisterResponse>('/api/auth/register', {
+            username,
+            email,
+            password,
+        });
+        return response.data;
     }
 
     /**
-     * 使用授权码换取 Token
+     * 登出
+     * POST /api/auth/logout
      */
-    async exchangeCodeForToken(code: string): Promise<TokenResponse> {
+    async logout(): Promise<void> {
         try {
-            const response = await axios.post<TokenResponse>(
-                `${this.config.authUrl}/token`,
-                new URLSearchParams({
-                    grant_type: 'authorization_code',
-                    code: code,
-                    redirect_uri: this.config.redirectUri,
-                    client_id: this.config.clientId,
-                    client_secret: this.config.clientSecret || '',
-                }),
-                {
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                }
-            );
-
-            await this.handleTokenResponse(response.data);
-            this.emit('authenticated');
-            return response.data;
-        } catch (error: any) {
-            this.emit('auth-error', error);
-            throw new Error(`Token exchange failed: ${error.message}`);
-        }
-    }
-
-    /**
-     * 刷新访问令牌
-     */
-    async refreshAccessToken(): Promise<TokenResponse> {
-        if (!this.refreshToken) {
-            throw new Error('No refresh token available');
-        }
-
-        try {
-            const response = await axios.post<TokenResponse>(
-                `${this.config.authUrl}/token`,
-                new URLSearchParams({
-                    grant_type: 'refresh_token',
-                    refresh_token: this.refreshToken,
-                    client_id: this.config.clientId,
-                    client_secret: this.config.clientSecret || '',
-                }),
-                {
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                }
-            );
-
-            await this.handleTokenResponse(response.data);
-            this.emit('token-refreshed');
-            return response.data;
-        } catch (error: any) {
-            this.emit('auth-error', error);
-            await this.clearSession();
-            throw error;
-        }
-    }
-
-    /**
-     * 处理 Token 响应
-     */
-    private async handleTokenResponse(tokenResponse: TokenResponse): Promise<void> {
-        this.accessToken = tokenResponse.access_token;
-        this.refreshToken = tokenResponse.refresh_token || this.refreshToken;
-        this.tokenExpiry = Date.now() + (tokenResponse.expires_in * 1000);
-
-        // 保存到密钥存储
-        await this.saveSession();
-
-        // 设置自动刷新
-        this.setupTokenRefresh();
-
-        // 获取用户信息
-        await this.fetchUserInfo();
-    }
-
-    /**
-     * 获取用户信息
-     */
-    async fetchUserInfo(): Promise<AuthUserInfo> {
-        try {
-            const response = await axios.get<AuthUserInfo>(
-                `${this.config.authUrl}/userinfo`,
-                {
-                    headers: {
-                        Authorization: `Bearer ${this.accessToken}`,
-                    },
-                }
-            );
-
-            this.userInfo = response.data;
-            this.emit('user-info-updated', this.userInfo);
-            return this.userInfo;
-        } catch (error: any) {
-            console.error('Failed to fetch user info:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * 设置自动刷新 Token
-     */
-    private setupTokenRefresh(): void {
-        if (this.refreshTimer) {
-            clearTimeout(this.refreshTimer);
-        }
-
-        // 在过期前 5 分钟刷新
-        const refreshDelay = Math.max(0, this.tokenExpiry - Date.now() - 5 * 60 * 1000);
-
-        this.refreshTimer = setTimeout(async () => {
-            try {
-                await this.refreshAccessToken();
-            } catch (error) {
-                this.emit('auth-error', error);
+            if (this.currentToken) {
+                await this.apiClient.post('/api/auth/logout', null, {
+                    headers: this.getAuthHeaders(),
+                });
             }
-        }, refreshDelay);
-    }
-
-    /**
-     * 检查 Token 是否有效
-     */
-    isTokenValid(): boolean {
-        return this.accessToken !== '' && Date.now() < this.tokenExpiry;
-    }
-
-    /**
-     * 获取访问令牌
-     */
-    getAccessToken(): string {
-        return this.accessToken;
-    }
-
-    /**
-     * 获取用户信息
-     */
-    getUserInfo(): AuthUserInfo | null {
-        return this.userInfo;
-    }
-
-    /**
-     * 保存会话
-     */
-    private async saveSession(): Promise<void> {
-        const context = vscode Secrets.workspace;
-        if (context) {
-            await Promise.all([
-                context.store('auth_access_token', this.accessToken),
-                context.store('auth_refresh_token', this.refreshToken),
-                context.store('auth_token_expiry', this.tokenExpiry.toString()),
-            ]);
-        }
-    }
-
-    /**
-     * 加载会话
-     */
-    async loadSession(): Promise<boolean> {
-        const context = vscode Secrets.workspace;
-        if (!context) {
-            return false;
-        }
-
-        try {
-            const [accessToken, refreshToken, tokenExpiry] = await Promise.all([
-                context.get('auth_access_token'),
-                context.get('auth_refresh_token'),
-                context.get('auth_token_expiry'),
-            ]);
-
-            if (!accessToken) {
-                return false;
-            }
-
-            this.accessToken = accessToken || '';
-            this.refreshToken = refreshToken || '';
-            this.tokenExpiry = parseInt(tokenExpiry || '0', 10);
-
-            // 检查是否需要刷新
-            if (this.isTokenValid()) {
-                this.setupTokenRefresh();
-                await this.fetchUserInfo();
-                this.emit('authenticated');
-                return true;
-            } else if (this.refreshToken) {
-                // Token 已过期，尝试刷新
-                await this.refreshAccessToken();
-                return true;
-            }
-
-            return false;
         } catch (error) {
-            console.error('Failed to load session:', error);
-            return false;
+            // 即使登出请求失败，也要清理本地状态
+            console.warn('Logout request failed, clearing local state anyway');
         }
+        await this.clearStoredToken();
+        this.emit('authChange', false);
     }
 
     /**
-     * 清除会话
+     * 刷新 Token
+     * POST /api/auth/refresh
      */
-    async clearSession(): Promise<void> {
-        this.accessToken = '';
-        this.refreshToken = '';
-        this.userInfo = null;
+    async refreshToken(): Promise<LoginResponse> {
+        if (!this.currentRefreshToken) {
+            throw new Error('没有可用的刷新令牌，请重新登录');
+        }
+
+        const response = await this.apiClient.post<LoginResponse>('/api/auth/refresh', {
+            refresh_token: this.currentRefreshToken,
+        });
+
+        await this.handleTokenResponse(response.data);
+        return response.data;
+    }
+
+    /**
+     * 修改密码
+     * PUT /api/auth/password
+     */
+    async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+        if (!this.isAuthenticated()) {
+            throw new Error('请先登录');
+        }
+
+        await this.apiClient.put('/api/auth/password', {
+            old_password: oldPassword,
+            new_password: newPassword,
+        }, {
+            headers: this.getAuthHeaders(),
+        });
+
+        vscode.window.showInformationMessage('密码修改成功');
+    }
+
+    // ==================== Token 管理 ====================
+
+    /**
+     * 获取已存储的 Token
+     */
+    async getStoredToken(): Promise<string> {
+        return this.currentToken;
+    }
+
+    /**
+     * 存储 Token
+     */
+    async setStoredToken(token: string): Promise<void> {
+        await this.secretStorage.store('llm-assistant.access-token', token);
+        this.currentToken = token;
+    }
+
+    /**
+     * 清除已存储的 Token
+     */
+    async clearStoredToken(): Promise<void> {
+        this.currentToken = '';
+        this.currentRefreshToken = '';
         this.tokenExpiry = 0;
 
         if (this.refreshTimer) {
@@ -298,68 +186,170 @@ export class AuthClient extends EventEmitter {
             this.refreshTimer = null;
         }
 
-        const context = vscode Secrets.workspace;
-        if (context) {
-            await Promise.all([
-                context.delete('auth_access_token'),
-                context.delete('auth_refresh_token'),
-                context.delete('auth_token_expiry'),
+        await Promise.all([
+            this.secretStorage.delete('llm-assistant.access-token'),
+            this.secretStorage.delete('llm-assistant.refresh-token'),
+            this.secretStorage.delete('llm-assistant.token-expiry'),
+        ]);
+    }
+
+    /**
+     * 从 SecretStorage 加载 Token
+     */
+    async loadStoredToken(): Promise<boolean> {
+        try {
+            const [token, refreshToken, expiryStr] = await Promise.all([
+                this.secretStorage.get('llm-assistant.access-token'),
+                this.secretStorage.get('llm-assistant.refresh-token'),
+                this.secretStorage.get('llm-assistant.token-expiry'),
             ]);
+
+            if (!token) {
+                return false;
+            }
+
+            this.currentToken = token;
+            this.currentRefreshToken = refreshToken || '';
+            this.tokenExpiry = expiryStr ? parseInt(expiryStr, 10) : 0;
+
+            if (this.isAuthenticated()) {
+                this.setupAutoRefresh();
+                this.emit('authChange', true);
+                return true;
+            } else if (this.currentRefreshToken) {
+                // Token 已过期，尝试刷新
+                try {
+                    await this.refreshToken();
+                    this.emit('authChange', true);
+                    return true;
+                } catch {
+                    await this.clearStoredToken();
+                    return false;
+                }
+            }
+
+            return false;
+        } catch (error) {
+            console.error('Failed to load stored token:', error);
+            return false;
+        }
+    }
+
+    // ==================== 状态检查 ====================
+
+    /**
+     * 检查是否已认证（Token 存在且未过期）
+     * 解码 JWT 检查 exp 字段
+     */
+    isAuthenticated(): boolean {
+        if (!this.currentToken) {
+            return false;
         }
 
-        this.emit('logout');
-    }
-
-    /**
-     * 登出
-     */
-    async logout(): Promise<void> {
-        await this.clearSession();
-    }
-
-    /**
-     * 检查用户是否有指定角色
-     */
-    hasRole(role: string): boolean {
-        return this.userInfo?.roles.includes(role) || false;
-    }
-
-    /**
-     * 检查用户是否有任一指定角色
-     */
-    hasAnyRole(roles: string[]): boolean {
-        return roles.some(role => this.hasRole(role));
-    }
-
-    /**
-     * 检查用户是否有所有指定角色
-     */
-    hasAllRoles(roles: string[]): boolean {
-        return roles.every(role => this.hasRole(role));
-    }
-
-    /**
-     * 获取用户的显示名称
-     */
-    getDisplayName(): string {
-        if (!this.userInfo) {
-            return 'Unknown';
+        try {
+            const payload = this.decodeJWT(this.currentToken);
+            if (!payload || !payload.exp) {
+                return false;
+            }
+            // 检查是否已过期（留 30 秒缓冲）
+            return Date.now() < (payload.exp * 1000) - 30000;
+        } catch {
+            return false;
         }
-        return this.userInfo.name || this.userInfo.email || 'Unknown';
     }
 
     /**
-     * 获取用户的部门
+     * 获取当前 Token
      */
-    getDepartment(): string | undefined {
-        return this.userInfo?.department;
+    getAccessToken(): string {
+        return this.currentToken;
     }
 
     /**
-     * 获取用户的工号
+     * 获取认证 Headers
      */
-    getEmployeeId(): string | undefined {
-        return this.userInfo?.employee_id;
+    getAuthHeaders(): Record<string, string> {
+        if (!this.currentToken) {
+            return {};
+        }
+        return {
+            'Authorization': `Bearer ${this.currentToken}`,
+        };
+    }
+
+    /**
+     * 监听认证状态变化
+     */
+    onAuthChange(callback: (isAuthenticated: boolean) => void): void {
+        this.on('authChange', callback);
+    }
+
+    // ==================== 内部方法 ====================
+
+    /**
+     * 解码 JWT（仅解码 payload，不做签名验证）
+     */
+    private decodeJWT(token: string): JWTPayload | null {
+        try {
+            const parts = token.split('.');
+            if (parts.length !== 3) {
+                return null;
+            }
+            // Base64Url 解码
+            const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const jsonStr = Buffer.from(base64, 'base64').toString('utf-8');
+            return JSON.parse(jsonStr) as JWTPayload;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 处理 Token 响应
+     */
+    private async handleTokenResponse(response: LoginResponse): Promise<void> {
+        this.currentToken = response.access_token;
+        this.currentRefreshToken = response.refresh_token || '';
+        this.tokenExpiry = Date.now() + (response.expires_in * 1000);
+
+        // 安全存储
+        await Promise.all([
+            this.secretStorage.store('llm-assistant.access-token', this.currentToken),
+            this.secretStorage.store('llm-assistant.refresh-token', this.currentRefreshToken),
+            this.secretStorage.store('llm-assistant.token-expiry', this.tokenExpiry.toString()),
+        ]);
+
+        // 设置自动刷新（在过期前 5 分钟刷新）
+        this.setupAutoRefresh();
+
+        this.emit('authChange', true);
+    }
+
+    /**
+     * 设置自动刷新定时器
+     */
+    private setupAutoRefresh(): void {
+        if (this.refreshTimer) {
+            clearTimeout(this.refreshTimer);
+        }
+
+        const refreshDelay = Math.max(0, this.tokenExpiry - Date.now() - 5 * 60 * 1000);
+        if (refreshDelay <= 0) {
+            // 已经过期，立即刷新
+            this.refreshToken().catch(() => {
+                console.warn('Auto token refresh failed');
+            });
+            return;
+        }
+
+        this.refreshTimer = setTimeout(async () => {
+            try {
+                await this.refreshToken();
+            } catch (error) {
+                console.error('Auto token refresh failed:', error);
+                this.emit('authChange', false);
+            }
+        }, refreshDelay);
     }
 
     /**
@@ -368,21 +358,8 @@ export class AuthClient extends EventEmitter {
     dispose(): void {
         if (this.refreshTimer) {
             clearTimeout(this.refreshTimer);
+            this.refreshTimer = null;
         }
         this.removeAllListeners();
     }
-}
-
-/**
- * 创建认证客户端实例
- */
-export function createAuthClient(config: Partial<AuthConfig> = {}): AuthClient {
-    const defaultConfig: AuthConfig = {
-        authUrl: 'https://auth.company.com',
-        clientId: 'vscode-plugin',
-        redirectUri: 'vscode://company.enterprise-llm-assistant/callback',
-        scope: ['openid', 'profile', 'email', 'department', 'employee_id'],
-    };
-
-    return new AuthClient({ ...defaultConfig, ...config });
 }

@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { RequestLogger } from '../utils/logger';
+export { auditLogger } from './audit';
+export { contentFilter, startContentFilterRefresh, stopContentFilterRefresh } from './content-filter';
 
 /**
  * 请求日志中间件
@@ -45,7 +47,7 @@ export function errorHandler(
   err: any,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) {
   RequestLogger.error('Error occurred', {
     error: err.message,
@@ -87,7 +89,7 @@ export function errorHandler(
   }
 
   // 默认错误响应
-  res.status(err.status || 500).json({
+  return res.status(err.status || 500).json({
     error: {
       message: err.message || 'Internal Server Error',
       type: 'internal_error',
@@ -99,7 +101,7 @@ export function errorHandler(
 /**
  * 404 处理中间件
  */
-export function notFoundHandler(req: Request, res: Response) {
+export function notFoundHandler(_req: Request, res: Response) {
   res.status(404).json({
     error: {
       message: 'Not Found',

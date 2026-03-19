@@ -1,81 +1,77 @@
 /**
  * Code Completion Provider
  * 代码补全提供者
+ *
+ * - InlineCompletionItemProvider 实现
+ * - 获取当前行上下文 + 光标前缀
+ * - 调用 aiClient.codeCompletion()
+ * - 防抖 500ms
+ * - 输入停顿 500ms 后自动触发
  */
 
 import * as vscode from 'vscode';
 import { AIClient } from '../client/aiClient';
 import { getConfigManager, ConfigKey } from '../client/config';
-import { Debouncer } from '../utils/debounce';
+import { debounceAsync } from '../utils/debounce';
 
 /**
- * 补全项类型
- */
-enum CompletionType {
-    Suggestion = 0,
-    Snippet = 1,
-    Function = 2,
-}
-
-/**
- * 内联补全项
- */
-class InlineCompletion implements vscode.InlineCompletionItem {
-    readonly insertText: string;
-    readonly range?: vscode.Range;
-    readonly command?: vscode.Command;
-
-    constructor(text: string, range?: vscode.Range) {
-        this.insertText = text;
-        this.range = range;
-    }
-}
-
-/**
- * AI 代码补全提供者
+ * AI 代码补全提供者（内联）
  */
 export class AICodeCompletionProvider implements vscode.InlineCompletionItemProvider {
     private client: AIClient;
-    private debouncer: Debouncer<string>;
-    private currentCompletion: InlineCompletion | null = null;
+    private debounceFn: ReturnType<typeof debounceAsync> | null = null;
+    private currentCompletion: string | null = null;
     private isCompleting = false;
 
     constructor(client: AIClient) {
         this.client = client;
-        this.debouncer = new Debouncer<string>(
-            this.requestCompletion.bind(this),
-            getConfigManager().getAutocompleteDebounce()
+
+        // 初始化 500ms 防抖
+        const config = getConfigManager();
+        this.debounceFn = debounceAsync(
+            (prefix: string) => this.requestCompletion(prefix),
+            config.getAutocompleteDebounce() // 500ms
         );
 
         // 监听配置变化
-        getConfigManager().onChange(ConfigKey.AUTOCOMPLETE_DEBOUNCE, (value) => {
-            this.debouncer.setDelay(value as number);
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('llm-assistant.autocompleteDebounce')) {
+                const newDelay = getConfigManager().getAutocompleteDebounce();
+                this.debounceFn = debounceAsync(
+                    (prefix: string) => this.requestCompletion(prefix),
+                    newDelay
+                );
+            }
         });
     }
 
     /**
-     * 提供内联补全
+     * 提供内联补全项
      */
     async provideInlineCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position,
-        context: vscode.InlineCompletionContext,
+        _context: vscode.InlineCompletionContext,
         token: vscode.CancellationToken
     ): Promise<vscode.InlineCompletionList> {
-        // 检查是否启用自动补全
+        // 检查是否启用
         if (!getConfigManager().isAutocompleteEnabled()) {
             return { items: [] };
         }
 
-        // 检查是否正在补全
-        if (this.isCompleting) {
-            if (this.currentCompletion) {
-                return { items: [this.currentCompletion] };
-            }
-            return { items: [] };
+        // 如果正在补全，返回缓存的结果
+        if (this.isCompleting && this.currentCompletion) {
+            return {
+                items: [
+                    new vscode.InlineCompletionItem(
+                        this.currentCompletion,
+                        new vscode.Range(position, position)
+                    ),
+                ],
+            };
         }
 
-        // 获取当前行的文本
+        // 获取当前行文本
         const lineText = document.lineAt(position.line).text;
         const prefix = lineText.substring(0, position.character);
 
@@ -84,25 +80,25 @@ export class AICodeCompletionProvider implements vscode.InlineCompletionItemProv
             return { items: [] };
         }
 
-        // 取消之前的请求
-        this.debouncer.cancel();
-        this.currentCompletion = null;
-
-        // 调度新的补全请求
-        const completionPromise = this.debouncer.schedule(prefix);
-
-        // 等待补全结果
+        // 防抖调度
         try {
             const result = await Promise.race([
-                completionPromise,
+                this.debounceFn!(prefix),
                 new Promise<null>((resolve) => {
                     token.onCancellationRequested(() => resolve(null));
                 }),
             ]);
 
             if (result) {
-                this.currentCompletion = new InlineCompletion(result);
-                return { items: [this.currentCompletion] };
+                this.currentCompletion = result;
+                return {
+                    items: [
+                        new vscode.InlineCompletionItem(
+                            result,
+                            new vscode.Range(position, position)
+                        ),
+                    ],
+                };
             }
         } catch (error) {
             console.error('Completion error:', error);
@@ -112,38 +108,31 @@ export class AICodeCompletionProvider implements vscode.InlineCompletionItemProv
     }
 
     /**
-     * 检查是否应该触发补全
+     * 判断是否应触发补全
      */
     private shouldComplete(prefix: string): boolean {
-        // 过滤空行
-        if (!prefix.trim()) {
-            return false;
-        }
+        if (!prefix.trim()) return false;
 
-        // 过滤注释
         const trimmed = prefix.trim();
+        // 过滤注释
         if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('/*')) {
             return false;
         }
 
-        // 过滤字符串字面量
-        const lastQuote = Math.max(
-            prefix.lastIndexOf('"'),
-            prefix.lastIndexOf("'"),
-            prefix.lastIndexOf('`')
-        );
-        if (lastQuote !== -1 && (lastQuote > prefix.lastIndexOf('\n') + 1)) {
-            // 检查是否是闭合的引号
-            const afterLastQuote = prefix.substring(lastQuote + 1);
-            if (afterLastQuote.indexOf(prefix[lastQuote]) === -1) {
-                return false;
+        // 过滤字符串内部
+        const quotes = ['"', "'", '`'];
+        for (const q of quotes) {
+            const lastIdx = prefix.lastIndexOf(q);
+            if (lastIdx !== -1) {
+                const after = prefix.substring(lastIdx + 1);
+                if (!after.includes(q)) {
+                    return false;
+                }
             }
         }
 
-        // 过滤单字符输入
-        if (prefix.length < 2) {
-            return false;
-        }
+        // 过滤过短的输入
+        if (prefix.trim().length < 2) return false;
 
         return true;
     }
@@ -156,32 +145,30 @@ export class AICodeCompletionProvider implements vscode.InlineCompletionItemProv
 
         try {
             const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                return '';
-            }
+            if (!editor) return '';
 
             const document = editor.document;
             const position = editor.selection.active;
 
-            // 获取上下文（当前行之前的几行）
-            const contextLines = this.getContextLines(document, position.line, 10);
-            const suffixLines = this.getSuffixLines(document, position.line, 5);
+            // 获取上下文（前 10 行 + 当前行前缀）
+            const startLine = Math.max(0, position.line - 10);
+            const contextLines: string[] = [];
+            for (let i = startLine; i < position.line; i++) {
+                contextLines.push(document.lineAt(i).text);
+            }
+            contextLines.push(prefix);
 
-            // 构建补全请求
-            const code = contextLines + prefix;
+            const code = contextLines.join('\n');
 
-            // 请求 AI 补全
-            const completion = await this.client.codeComplete(
+            // 调用 AI 补全 API
+            const response = await this.client.codeCompletion(
                 code,
                 document.languageId,
-                prefix.length,
-                'DeepSeek-Coder-33B'
+                prefix.length
             );
 
-            // 清理补全结果（移除已输入的部分）
-            const cleaned = this.cleanCompletion(completion, prefix);
-
-            return cleaned;
+            // 清理补全结果
+            return this.cleanCompletion(response.completion, prefix);
         } catch (error) {
             console.error('Failed to get completion:', error);
             return '';
@@ -191,72 +178,32 @@ export class AICodeCompletionProvider implements vscode.InlineCompletionItemProv
     }
 
     /**
-     * 获取上下文行
-     */
-    private getContextLines(document: vscode.TextDocument, currentLine: number, count: number): string {
-        const lines: string[] = [];
-        for (let i = Math.max(0, currentLine - count); i < currentLine; i++) {
-            lines.push(document.lineAt(i).text);
-        }
-        return lines.join('\n') + '\n';
-    }
-
-    /**
-     * 获取后缀行
-     */
-    private getSuffixLines(document: vscode.TextDocument, currentLine: number, count: number): string {
-        const lines: string[] = [];
-        for (let i = currentLine + 1; i <= Math.min(document.lineCount - 1, currentLine + count); i++) {
-            lines.push(document.lineAt(i).text);
-        }
-        return lines.join('\n');
-    }
-
-    /**
      * 清理补全结果
      */
     private cleanCompletion(completion: string, prefix: string): string {
-        // 移除已经输入的前缀
-        if (completion.startsWith(prefix)) {
-            completion = completion.substring(prefix.length);
+        let result = completion;
+
+        // 移除已输入的前缀
+        if (result.startsWith(prefix)) {
+            result = result.substring(prefix.length);
         }
 
-        // 移除多余的换行
-        completion = completion.replace(/^\n+/, '');
+        // 移除开头的多余换行
+        result = result.replace(/^\n+/, '');
 
-        // 只返回第一行或第一段
-        const lines = completion.split('\n');
+        // 只返回前几行
+        const lines = result.split('\n');
         if (lines.length > 3) {
-            completion = lines.slice(0, 3).join('\n');
+            result = lines.slice(0, 3).join('\n');
         }
 
-        return completion;
-    }
-
-    /**
-     * 手动触发补全
-     */
-    async triggerManualCompletion(): Promise<void> {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            return;
-        }
-
-        const position = editor.selection.active;
-        const lineText = editor.document.lineAt(position.line).text;
-        const prefix = lineText.substring(0, position.character);
-
-        this.debouncer.cancel();
-
-        const completion = await this.requestCompletion(prefix);
-        if (completion) {
-            this.currentCompletion = new InlineCompletion(completion);
-            await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
-        }
+        return result;
     }
 
     dispose(): void {
-        this.debouncer.dispose();
+        if (this.debounceFn) {
+            this.debounceFn.cancel();
+        }
     }
 }
 
@@ -271,205 +218,75 @@ export class SmartSnippetProvider implements vscode.CompletionItemProvider {
         this.client = client;
     }
 
-    /**
-     * 提供代码补全项
-     */
     async provideCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position,
         token: vscode.CancellationToken,
         context: vscode.CompletionContext
     ): Promise<vscode.CompletionItem[]> {
-        // 只在显式触发时生成智能片段
+        // 只在显式触发时生成
         if (context.triggerKind !== vscode.CompletionTriggerKind.Invoke) {
             return [];
         }
 
-        // 避免频繁请求
-        if (this.isGenerating) {
-            return [];
-        }
-
+        if (this.isGenerating) return [];
         this.isGenerating = true;
 
         try {
             const lineText = document.lineAt(position.line).text;
             const prefix = lineText.substring(0, position.character).trim();
 
-            // 检测是否是需要补全的情况
-            if (!this.shouldProvideSnippet(prefix)) {
+            const patterns = [
+                /^function\s+\w*/, /^class\s+\w*/, /^def\s+\w*/,
+                /^if\s*$/, /^for\s*$/, /^while\s*$/,
+                /^interface\s+\w*/, /^type\s+\w*/, /^enum\s+\w*/,
+            ];
+
+            if (!patterns.some(p => p.test(prefix))) {
                 return [];
             }
 
-            // 生成智能补全建议
-            const suggestion = await this.generateSnippet(document, position);
-
-            if (suggestion) {
-                const item = new vscode.CompletionItem(suggestion.label, vscode.CompletionItemKind.Snippet);
-                item.insertText = new vscode.SnippetString(suggestion.snippet);
-                item.documentation = new vscode.MarkdownString(suggestion.documentation);
-                item.detail = 'AI 生成';
-                return [item];
+            const startLine = Math.max(0, position.line - 20);
+            const lines: string[] = [];
+            for (let i = startLine; i <= position.line; i++) {
+                lines.push(i === position.line
+                    ? document.lineAt(i).text.substring(0, position.character)
+                    : document.lineAt(i).text);
             }
 
-            return [];
-        } catch (error) {
-            console.error('Snippet generation error:', error);
-            return [];
-        } finally {
-            this.isGenerating = false;
-        }
-    }
-
-    /**
-     * 检查是否应该提供片段
-     */
-    private shouldProvideSnippet(prefix: string): boolean {
-        // 在函数定义、类定义、条件语句等情况下触发
-        const patterns = [
-            /^function\s+\w*/,
-            /^class\s+\w*/,
-            /^def\s+\w*/,
-            /^if\s*$/,
-            /^for\s*$/,
-            /^while\s*$/,
-            /^switch\s*$/,
-            /^interface\s+\w*/,
-            /^type\s+\w*/,
-            /^enum\s+\w*/,
-        ];
-
-        return patterns.some(pattern => pattern.test(prefix));
-    }
-
-    /**
-     * 生成智能片段
-     */
-    private async generateSnippet(
-        document: vscode.TextDocument,
-        position: vscode.Position
-    ): Promise<{ label: string; snippet: string; documentation: string } | null> {
-        const contextLines = this.getContextLines(document, position, 20);
-        const language = document.languageId;
-
-        try {
-            const response = await this.client.chat({
-                model: 'DeepSeek-Coder-33B',
-                messages: [
+            const response = await this.client.chatCompletions(
+                [
                     {
                         role: 'system',
-                        content: '你是代码补全专家。根据上下文提供最佳的代码补全建议。返回JSON格式：{"label": "简短描述", "snippet": "VS Code snippet格式", "documentation": "详细说明"}'
+                        content: '你是代码补全专家。根据上下文提供代码补全。返回JSON：{"label":"描述","snippet":"VSCode snippet格式","doc":"说明"}',
                     },
                     {
                         role: 'user',
-                        content: `Language: ${language}\n\nContext:\n${contextLines}\n\nGenerate a code completion suggestion for the current cursor position.`
-                    }
+                        content: `Language: ${document.languageId}\nContext:\n${lines.join('\n')}\n\n生成代码补全。`,
+                    },
                 ],
-                max_tokens: 500,
-                temperature: 0.3,
-            });
+                undefined,
+                { max_tokens: 500, temperature: 0.3 }
+            );
 
-            const content = response.choices[0].message.content;
+            const content = response.choices[0]?.message?.content || '';
             const jsonMatch = content.match(/\{[\s\S]*\}/);
-
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-                return parsed;
+                const item = new vscode.CompletionItem(parsed.label, vscode.CompletionItemKind.Snippet);
+                item.insertText = new vscode.SnippetString(parsed.snippet);
+                item.documentation = new vscode.MarkdownString(parsed.doc);
+                item.detail = 'AI 生成';
+                return [item];
             }
         } catch (error) {
-            console.error('Failed to generate snippet:', error);
+            console.error('Snippet generation error:', error);
+        } finally {
+            this.isGenerating = false;
         }
 
-        return null;
+        return [];
     }
 
-    /**
-     * 获取上下文
-     */
-    private getContextLines(document: vscode.TextDocument, position: vscode.Position, count: number): string {
-        const startLine = Math.max(0, position.line - count);
-        const lines: string[] = [];
-
-        for (let i = startLine; i <= position.line; i++) {
-            const line = document.lineAt(i).text;
-            if (i === position.line) {
-                lines.push(line.substring(0, position.character));
-            } else {
-                lines.push(line);
-            }
-        }
-
-        return lines.join('\n');
-    }
-
-    dispose(): void {
-        // 清理资源
-    }
+    dispose(): void {}
 }
-
-/**
- * 防抖工具类
- */
-class Debouncer<T> {
-    private delay: number;
-    private timeout: NodeJS.Timeout | null = null;
-    private handler: (value: T) => Promise<string>;
-    private currentResolver: ((value: string) => void) | null = null;
-    private currentRejector: ((reason?: any) => void) | null = null;
-
-    constructor(handler: (value: T) => Promise<string>, delay: number) {
-        this.handler = handler;
-        this.delay = delay;
-    }
-
-    setDelay(delay: number): void {
-        this.delay = delay;
-    }
-
-    schedule(value: T): Promise<string> {
-        // 取消之前的请求
-        if (this.timeout) {
-            clearTimeout(this.timeout);
-            if (this.currentRejector) {
-                this.currentRejector(new Error('Cancelled'));
-            }
-        }
-
-        return new Promise((resolve, reject) => {
-            this.currentResolver = resolve;
-            this.currentRejector = reject;
-
-            this.timeout = setTimeout(async () => {
-                try {
-                    const result = await this.handler(value);
-                    if (this.currentResolver) {
-                        this.currentResolver(result);
-                    }
-                } catch (error) {
-                    if (this.currentRejector) {
-                        this.currentRejector(error);
-                    }
-                }
-            }, this.delay);
-        });
-    }
-
-    cancel(): void {
-        if (this.timeout) {
-            clearTimeout(this.timeout);
-            this.timeout = null;
-        }
-        if (this.currentRejector) {
-            this.currentRejector(new Error('Cancelled'));
-            this.currentRejector = null;
-        }
-        this.currentResolver = null;
-    }
-
-    dispose(): void {
-        this.cancel();
-    }
-}
-
-// 导出防抖类
-export { Debouncer };

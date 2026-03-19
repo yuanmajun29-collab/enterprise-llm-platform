@@ -1,4 +1,4 @@
-import { createClient, RedisClientType } from 'redis';
+import type { RedisClientType } from 'redis';
 import { logger } from '../utils/logger';
 
 // Redis 客户端（从 index.ts 导入）

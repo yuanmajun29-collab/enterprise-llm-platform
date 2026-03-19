@@ -19,9 +19,9 @@ router.get('/', async (req: Request, res: Response) => {
       page: Number(page) || 1,
       pageSize: Number(pageSize) || 20,
     });
-    res.json(result);
+    return res.json(result);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -37,9 +37,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     const conversation = await conversationController.getConversationById(id, userId);
-    res.json(conversation);
+    return res.json(conversation);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -55,9 +55,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
     const conversationData = req.body;
     const conversation = await conversationController.createConversation(userId, conversationData);
-    res.status(201).json(conversation);
+    return res.status(201).json(conversation);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -74,9 +74,9 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
     const updates = req.body;
     const conversation = await conversationController.updateConversation(id, userId, updates);
-    res.json(conversation);
+    return res.json(conversation);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -92,9 +92,9 @@ router.patch('/:id/archive', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     const conversation = await conversationController.toggleArchiveConversation(id, userId);
-    res.json(conversation);
+    return res.json(conversation);
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -110,9 +110,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     await conversationController.deleteConversation(id, userId);
-    res.json({ message: '会话已删除' });
+    return res.json({ message: '会话已删除' });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 
@@ -127,9 +127,9 @@ router.delete('/', async (req: Request, res: Response) => {
       return res.status(401).json({ error: { message: '未授权', type: 'unauthorized' } });
     }
     await conversationController.clearAllConversations(userId);
-    res.json({ message: '所有会话已清空' });
+    return res.json({ message: '所有会话已清空' });
   } catch (error: any) {
-    res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
+    return res.status(error.status || 500).json({ error: { message: error.message, type: error.type || 'internal_error' } });
   }
 });
 

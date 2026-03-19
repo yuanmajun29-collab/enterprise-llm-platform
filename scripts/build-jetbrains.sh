@@ -10,38 +10,41 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 JETBRAINS_DIR="$PROJECT_DIR/plugin/jetbrains"
+DIST_DIR="$PROJECT_DIR/dist"
 
 # 颜色输出
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${BLUE}[INFO]${NC} Building JetBrains plugin..."
 
-cd "$JETBRAINS_DIR"
-
-# 检查 Gradle
-if ! command -v gradle &> /dev/null; then
-    if [ -f "./gradlew" ]; then
-        GRADLE_CMD="./gradlew"
-    else
-        echo -e "${RED}[ERROR]${NC} Gradle not found. Please install Gradle first."
-        exit 1
-    fi
-else
-    GRADLE_CMD="gradle"
-fi
-
-# 检查 JDK
+# 检查 JDK 11+
 if ! command -v java &> /dev/null; then
-    echo -e "${RED}[ERROR]${NC} Java not found. Please install JDK 17+."
+    echo -e "${RED}[ERROR]${NC} Java not found. Please install JDK 11+."
     exit 1
 fi
 
 JAVA_VERSION=$(java -version 2>&1 | head -n 1 | cut -d'"' -f2 | cut -d'.' -f1)
-if [ "$JAVA_VERSION" -lt 17 ]; then
-    echo -e "${RED}[ERROR]${NC} JDK 17+ is required. Current version: $JAVA_VERSION"
+if [ -z "$JAVA_VERSION" ] || [ "$JAVA_VERSION" -lt 11 ]; then
+    echo -e "${RED}[ERROR]${NC} JDK 11+ is required. Current: $(java -version 2>&1 | head -1)"
+    exit 1
+fi
+echo -e "${BLUE}[INFO]${NC} Using JDK $JAVA_VERSION"
+
+# 创建输出目录
+mkdir -p "$DIST_DIR"
+
+cd "$JETBRAINS_DIR"
+
+# 设置 Gradle 权限
+if [ -f "./gradlew" ]; then
+    chmod +x gradlew
+    GRADLE_CMD="./gradlew"
+else
+    echo -e "${RED}[ERROR]${NC} gradlew not found in $JETBRAINS_DIR"
     exit 1
 fi
 
@@ -50,14 +53,18 @@ echo -e "${BLUE}[INFO]${NC} Running Gradle build..."
 $GRADLE_CMD clean buildPlugin
 
 # 检查构建结果
-if [ -f "build/distributions/*.zip" ]; then
+if ls build/distributions/*.zip 1> /dev/null 2>&1; then
+    # 复制到 dist 目录
+    cp build/distributions/*.zip "$DIST_DIR/"
+
     echo -e "${GREEN}[SUCCESS]${NC} JetBrains plugin built successfully!"
     echo ""
-    echo "Output: $JETBRAINS_DIR/build/distributions/"
+    echo "Output:"
+    ls -la "$DIST_DIR"/*.zip 2>/dev/null
     echo ""
     echo "Install in IDE:"
-    echo "  Settings -> Plugins -> Install Plugin from Disk"
+    echo "  Settings → Plugins → ⚙️ → Install Plugin from Disk"
 else
-    echo -e "${RED}[ERROR]${NC} Build failed. Check the logs above."
+    echo -e "${RED}[ERROR]${NC} Build failed. No zip found in build/distributions/"
     exit 1
 fi

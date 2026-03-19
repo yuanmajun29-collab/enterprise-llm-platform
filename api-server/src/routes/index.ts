@@ -1,14 +1,15 @@
 import { Router } from 'express';
-import { authRoutes } from './auth.routes';
-import { userRoutes } from './user.routes';
-import { modelRoutes } from './model.routes';
-import { conversationRoutes } from './conversation.routes';
-import { usageRoutes } from './usage.routes';
+import authRoutes from './auth.routes';
+import userRoutes from './user.routes';
+import modelRoutes from './model.routes';
+import conversationRoutes from './conversation.routes';
+import usageRoutes from './usage.routes';
+import { apikeyRoutes } from './apikey.routes';
 
 const router = Router();
 
 // 健康检查
-router.get('/health', (req, res) => {
+router.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -23,5 +24,6 @@ router.use('/user', userRoutes);
 router.use('/models', modelRoutes);
 router.use('/conversations', conversationRoutes);
 router.use('/usage', usageRoutes);
+router.use('/apikeys', apikeyRoutes);
 
 export default router;

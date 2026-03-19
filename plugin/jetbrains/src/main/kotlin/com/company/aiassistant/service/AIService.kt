@@ -1,184 +1,185 @@
 package com.company.aiassistant.service
 
+import com.company.aiassistant.config.AIAssistantSettings
+import com.company.aiassistant.config.AIConfig
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
-import com.intellij.util.io.HttpRequests
-import org.java_websocket.client.WebSocketClient
-import org.java_websocket.handshake.ServerHandshake
-import java.net.URI
-import java.util.*
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * AI 消息数据类
- */
-data class AIMessage(
+// ==================== 数据类 ====================
+
+data class ChatMessage(
     val role: String,
     val content: String
 )
 
-/**
- * AI 请求配置
- */
-data class AIRequest(
+data class ChatRequest(
     val model: String,
-    val messages: List<AIMessage>,
+    val messages: List<ChatMessage>,
     val temperature: Double = 0.7,
-    val maxTokens: Int = 2048,
+    val max_tokens: Int = 2000,
     val stream: Boolean = false
 )
 
-/**
- * AI 响应
- */
-data class AIResponse(
-    val id: String,
-    val choices: List<AIChoice>,
-    val usage: AIUsage?
+data class ChatResponse(
+    val id: String = "",
+    val choices: List<Choice> = emptyList(),
+    val usage: Usage? = null
 )
 
-data class AIChoice(
-    val index: Int,
-    val message: AIMessage?,
-    val delta: Map<String, Any>?,
-    val finishReason: String?
-)
+data class Choice(
+    val index: Int = 0,
+    val message: ChatMessage? = null,
+    val delta: Map<String, Any>? = null,
+    val finishReason: String? = null
+) {
+    // 兼容 JSON 的 finish_reason 字段
+    @Suppress("unused")
+    val finish_reason: String? get() = finishReason
+}
 
-data class AIUsage(
+data class Usage(
     val promptTokens: Int,
     val completionTokens: Int,
     val totalTokens: Int
+) {
+    // 兼容 JSON 的 snake_case 字段
+    @Suppress("unused")
+    val prompt_tokens: Int get() = promptTokens
+    @Suppress("unused")
+    val completion_tokens: Int get() = completionTokens
+    @Suppress("unused")
+    val total_tokens: Int get() = totalTokens
+}
+
+data class CodeRequest(
+    val code: String,
+    val language: String,
+    val cursor_position: Int,
+    val model: String
 )
 
-/**
- * API 错误响应
- */
-data class APIError(
-    val error: ErrorDetail
+data class CodeResponse(
+    val completion: String,
+    val model: String? = null,
+    val usage: Usage? = null
 )
 
-data class ErrorDetail(
-    val message: String,
-    val type: String?,
-    val code: String?
-)
-
-/**
- * 模型信息
- */
 data class ModelInfo(
     val id: String,
     val name: String,
-    val displayName: String,
-    val description: String,
-    val parameters: Long,
-    val contextLength: Int
+    val display_name: String = "",
+    val description: String = "",
+    val parameters: Long = 0,
+    val context_length: Int = 0
 )
 
+// ==================== AI 服务 ====================
+
 /**
- * AI 服务单例
+ * AI 服务 - 完整 HTTP 客户端
+ *
+ * 使用 HttpURLConnection（无外部依赖）：
+ * - chatCompletion: 聊天补全
+ * - codeCompletion: 代码补全
+ * - 错误处理：401 提示登录，429 限流提示，5xx 重试（最多 2 次）
+ * - Token 计数
  */
 @Service(Service.Level.APP)
 class AIService {
+
     private val logger = Logger.getInstance(AIService::class.java)
     private val objectMapper = jacksonObjectMapper()
-    private val isConnecting = AtomicBoolean(false)
+    private val tokenCounter = AtomicInteger(0)
 
-    private var apiBaseUrl: String = ""
-    private var apiKey: String = ""
-    private var accessToken: String = ""
+    private var baseUrl: String = ""
+    private var authToken: String = ""
     private var currentModel: String = "Qwen-72B-Chat"
 
     companion object {
+        private const val MAX_RETRIES = 2
+        private const val RETRY_BASE_DELAY_MS = 1000L
+        private const val REQUEST_TIMEOUT_MS = 60000
+        private const val CONNECT_TIMEOUT_MS = 10000
+
         @JvmStatic
         fun getInstance(): AIService {
             return ApplicationManager.getApplication().getService(AIService::class.java)
         }
     }
 
-    /**
-     * 配置 API
-     */
-    fun configure(apiUrl: String, apiKey: String, accessToken: String = "") {
-        this.apiBaseUrl = apiUrl.removeSuffix("/")
-        this.apiKey = apiKey
-        this.accessToken = accessToken
-        logger.info("AIService configured with API: $apiBaseUrl")
+    // ==================== 配置 ====================
+
+    fun configure(config: AIConfig) {
+        this.baseUrl = config.apiUrl.removeSuffix("/")
+        this.authToken = config.authToken
+        this.currentModel = config.defaultModel
+        logger.info("AIService configured: $baseUrl, model=$currentModel")
     }
 
-    /**
-     * 设置模型
-     */
+    fun configure(apiUrl: String, apiKey: String = "", accessToken: String = "") {
+        this.baseUrl = apiUrl.removeSuffix("/")
+        this.authToken = accessToken.ifEmpty { apiKey }
+    }
+
     fun setModel(model: String) {
         this.currentModel = model
     }
 
-    /**
-     * 获取模型列表
-     */
-    fun getModels(): CompletableFuture<List<ModelInfo>> {
-        val future = CompletableFuture<List<ModelInfo>>()
+    fun getModel(): String = currentModel
 
-        ApplicationManager.getApplication().executeOnPooledThread {
-            try {
-                val url = "$apiBaseUrl/api/models"
-                val response = HttpRequests.request(url)
-                    .tuner { connection ->
-                        connection.setRequestProperty("Authorization", getAuthHeader())
-                    }
-                    .readString(null)
-
-                val models = objectMapper.readValue<MutableList<ModelInfo>>(response)
-                future.complete(models)
-            } catch (e: Exception) {
-                logger.error("Failed to get models", e)
-                future.completeExceptionally(e)
-            }
-        }
-
-        return future
+    fun isConfigured(): Boolean {
+        return baseUrl.isNotEmpty() && authToken.isNotEmpty()
     }
 
-    /**
-     * 发送聊天请求
-     */
-    fun chat(messages: List<AIMessage>, stream: Boolean = false): CompletableFuture<AIResponse> {
-        val future = CompletableFuture<AIResponse>()
+    // ==================== 核心 API ====================
 
-        if (stream) {
-            return chatStream(messages)
-        }
+    /**
+     * 聊天补全
+     * POST /v1/chat/completions
+     */
+    fun chatCompletion(messages: List<ChatMessage>, model: String? = null): CompletableFuture<ChatResponse> {
+        val future = CompletableFuture<ChatResponse>()
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val request = AIRequest(
-                    model = currentModel,
+                val settings = AIAssistantSettings.getInstance()
+                val request = ChatRequest(
+                    model = model ?: currentModel,
                     messages = messages,
+                    temperature = settings.temperature,
+                    max_tokens = settings.maxTokens,
                     stream = false
                 )
 
-                val url = "$apiBaseUrl/v1/chat/completions"
-                val responseText = HttpRequests.request(url)
-                    .tuner { connection ->
-                        connection.doOutput(true)
-                        connection.setRequestProperty("Content-Type", "application/json")
-                        connection.setRequestProperty("Authorization", getAuthHeader())
-                        val requestBody = objectMapper.writeValueAsString(request)
-                        connection.outputStream.use { it.write(requestBody.toByteArray()) }
-                    }
-                    .readString(null)
+                val responseText = executeRequestWithRetry(
+                    endpoint = "/v1/chat/completions",
+                    body = objectMapper.writeValueAsString(request)
+                )
 
-                val response = objectMapper.readValue<AIResponse>(responseText)
+                val response: ChatResponse = objectMapper.readValue(responseText)
+
+                // Token 计数
+                response.usage?.let {
+                    tokenCounter.addAndGet(it.totalTokens)
+                }
+
                 future.complete(response)
             } catch (e: Exception) {
-                logger.error("Chat request failed", e)
+                logger.error("chatCompletion failed", e)
                 future.completeExceptionally(e)
             }
         }
@@ -187,122 +188,139 @@ class AIService {
     }
 
     /**
-     * 流式聊天
+     * 流式聊天补全
+     * POST /v1/chat/completions (stream: true)
+     * 使用 SSE (Server-Sent Events)
      */
-    private fun chatStream(messages: List<AIMessage>): CompletableFuture<AIResponse> {
-        val future = CompletableFuture<AIResponse>()
-        val builder = StringBuilder()
-        val tokens = mutableListOf<Int>()
+    fun chatCompletionStream(
+        messages: List<ChatMessage>,
+        model: String? = null,
+        onChunk: (String) -> Unit
+    ): CompletableFuture<ChatResponse> {
+        val future = CompletableFuture<ChatResponse>()
+        val fullContent = StringBuilder()
+        var promptTokens = 0
+        var completionTokens = 0
 
-        val wsUrl = apiBaseUrl.replace("http", "ws") + "/v1/chat/completions"
-
-        val client = object : WebSocketClient(URI.create(wsUrl)) {
-            override fun onOpen(handshakedata: ServerHandshake) {
-                logger.debug("WebSocket connection opened")
-                val request = AIRequest(
-                    model = currentModel,
+        ApplicationManager.getApplication().executeOnPooledThread {
+            var connection: HttpURLConnection? = null
+            try {
+                val settings = AIAssistantSettings.getInstance()
+                val request = ChatRequest(
+                    model = model ?: currentModel,
                     messages = messages,
+                    temperature = settings.temperature,
+                    max_tokens = settings.maxTokens,
                     stream = true
                 )
-                send(objectMapper.writeValueAsString(request))
-            }
 
-            override fun onMessage(message: String) {
-                if (message.startsWith("data: ")) {
-                    val data = message.substring(6)
-                    if (data == "[DONE]") {
-                        close()
-                        return
-                    }
+                val url = URL("$baseUrl/v1/chat/completions")
+                connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = CONNECT_TIMEOUT_MS
+                    readTimeout = REQUEST_TIMEOUT_MS
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("Accept", "text/event-stream")
+                    setAuthHeader(this)
+                }
 
-                    try {
-                        val chunk = objectMapper.readValue<AIResponse>(data)
-                        chunk.choices.firstOrNull()?.let { choice ->
-                            val delta = choice.delta
-                            val content = delta?.get("content") as? String
-                            if (content != null) {
-                                builder.append(content)
-                                tokens.add(content.length)
-                                // 通知进度
-                                ApplicationManager.getApplication().invokeLater {
-                                    // 这里可以发送进度更新事件
+                // 发送请求
+                connection.outputStream.use { os ->
+                    os.write(objectMapper.writeValueAsBytes(request))
+                    os.flush()
+                }
+
+                // 读取 SSE 流
+                val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val currentLine = line ?: continue
+
+                    if (currentLine.startsWith("data: ")) {
+                        val data = currentLine.removePrefix("data: ").trim()
+                        if (data == "[DONE]") break
+
+                        try {
+                            val chunk: ChatResponse = objectMapper.readValue(data)
+                            chunk.choices.firstOrNull()?.let { choice ->
+                                val delta = choice.delta
+                                val content = delta?.get("content") as? String
+                                if (!content.isNullOrEmpty()) {
+                                    fullContent.append(content)
+                                    completionTokens++
+                                    // 回调通知（在 EDT 线程）
+                                    ApplicationManager.getApplication().invokeLater {
+                                        onChunk(content)
+                                    }
                                 }
                             }
-                            if (choice.finishReason != null) {
-                                close()
-                            }
+                        } catch (e: Exception) {
+                            logger.warn("Failed to parse SSE chunk: $data")
                         }
-                    } catch (e: Exception) {
-                        logger.warn("Failed to parse stream chunk", e)
                     }
                 }
-            }
 
-            override fun onClose(code: Int, reason: String, remote: Boolean) {
-                logger.debug("WebSocket connection closed")
-                val response = AIResponse(
-                    id = UUID.randomUUID().toString(),
+                val response = ChatResponse(
+                    id = "stream-${System.currentTimeMillis()}",
                     choices = listOf(
-                        AIChoice(
+                        Choice(
                             index = 0,
-                            message = AIMessage("assistant", builder.toString()),
-                            delta = null,
+                            message = ChatMessage("assistant", fullContent.toString()),
                             finishReason = "stop"
                         )
                     ),
-                    usage = AIUsage(
-                        promptTokens = 0,
-                        completionTokens = tokens.size,
-                        totalTokens = tokens.size
+                    usage = Usage(
+                        promptTokens = promptTokens,
+                        completionTokens = completionTokens,
+                        totalTokens = promptTokens + completionTokens
                     )
                 )
-                future.complete(response)
-            }
 
-            override fun onError(ex: Exception) {
-                logger.error("WebSocket error", ex)
-                future.completeExceptionally(ex)
+                tokenCounter.addAndGet(promptTokens + completionTokens)
+                future.complete(response)
+
+            } catch (e: Exception) {
+                logger.error("chatCompletionStream failed", e)
+                future.completeExceptionally(e)
+            } finally {
+                connection?.disconnect()
             }
         }
-
-        val headers = mapOf("Authorization" to getAuthHeader())
-        client.addHeaders(headers)
-        client.connect()
 
         return future
     }
 
     /**
      * 代码补全
+     * POST /api/code/complete
      */
-    fun codeComplete(code: String, language: String, cursorPosition: Int): CompletableFuture<String> {
-        val future = CompletableFuture<String>()
+    fun codeCompletion(
+        code: String,
+        language: String,
+        cursorPos: Int,
+        model: String? = null
+    ): CompletableFuture<CodeResponse> {
+        val future = CompletableFuture<CodeResponse>()
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val request = mapOf(
-                    "code" to code,
-                    "language" to language,
-                    "cursorPosition" to cursorPosition,
-                    "model" to "DeepSeek-Coder-33B"
+                val request = CodeRequest(
+                    code = code,
+                    language = language,
+                    cursor_position = cursorPos,
+                    model = model ?: "DeepSeek-Coder-33B"
                 )
 
-                val url = "$apiBaseUrl/api/code/complete"
-                val responseText = HttpRequests.request(url)
-                    .tuner { connection ->
-                        connection.doOutput(true)
-                        connection.setRequestProperty("Content-Type", "application/json")
-                        connection.setRequestProperty("Authorization", getAuthHeader())
-                        val requestBody = objectMapper.writeValueAsString(request)
-                        connection.outputStream.use { it.write(requestBody.toByteArray()) }
-                    }
-                    .readString(null)
+                val responseText = executeRequestWithRetry(
+                    endpoint = "/api/code/complete",
+                    body = objectMapper.writeValueAsString(request)
+                )
 
-                val response = objectMapper.readTree(responseText)
-                val completion = response.path("completion").asText()
-                future.complete(completion)
+                val response: CodeResponse = objectMapper.readValue(responseText)
+                future.complete(response)
             } catch (e: Exception) {
-                logger.error("Code completion failed", e)
+                logger.error("codeCompletion failed", e)
                 future.completeExceptionally(e)
             }
         }
@@ -310,89 +328,191 @@ class AIService {
         return future
     }
 
-    /**
-     * 解释代码
-     */
-    fun explainCode(code: String, language: String): CompletableFuture<String> {
-        val messages = listOf(
-            AIMessage("system", "你是一个代码解释专家。请用简洁清晰的语言解释给定的代码片段。"),
-            AIMessage("user", "请解释以下 $language 代码的功能和原理：\n\n```$language\n$code\n```")
-        )
-        return chat(messages).thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
-    }
+    // ==================== Token 计数 ====================
 
     /**
-     * 重构代码
+     * 获取当前会话累计 Token 数
      */
+    fun getTokenCount(): Int = tokenCounter.get()
+
+    /**
+     * 重置 Token 计数
+     */
+    fun resetTokenCount() {
+        tokenCounter.set(0)
+    }
+
+    // ==================== 便捷方法 ====================
+
+    fun explainCode(code: String, language: String): CompletableFuture<String> {
+        val messages = listOf(
+            ChatMessage("system", "你是一个代码解释专家。请用简洁清晰的语言解释给定的代码片段。"),
+            ChatMessage("user", "请解释以下 $language 代码的功能和原理：\n\n```$language\n$code\n```")
+        )
+        return chatCompletion(messages).thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
+    }
+
     fun refactorCode(code: String, language: String, instructions: String? = null): CompletableFuture<String> {
-        val userMessage = if (instructions != null) {
+        val userMsg = if (instructions != null) {
             "请根据以下指令重构 $language 代码：$instructions\n\n```$language\n$code\n```"
         } else {
             "请重构以下 $language 代码，使其更加简洁高效：\n\n```$language\n$code\n```"
         }
-
         val messages = listOf(
-            AIMessage("system", "你是一个代码重构专家。请根据指令重构代码，使其更加简洁、高效、可维护。只输出重构后的代码，不要包含解释。"),
-            AIMessage("user", userMessage)
+            ChatMessage("system", "你是一个代码重构专家。请根据指令重构代码，使其更加简洁、高效、可维护。"),
+            ChatMessage("user", userMsg)
         )
-        return chat(messages).thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
+        return chatCompletion(messages, "DeepSeek-Coder-33B")
+            .thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
     }
 
-    /**
-     * 生成测试
-     */
     fun generateTests(code: String, language: String): CompletableFuture<String> {
         val messages = listOf(
-            AIMessage("system", "你是一个测试代码生成专家。请为给定的代码生成完整的单元测试，包括正常场景和边界情况的测试用例。"),
-            AIMessage("user", "请为以下 $language 代码生成完整的单元测试：\n\n```$language\n$code\n```")
+            ChatMessage("system", "你是一个测试代码生成专家。请为给定的代码生成完整的单元测试。"),
+            ChatMessage("user", "请为以下 $language 代码生成完整的单元测试：\n\n```$language\n$code\n```")
         )
-        return chat(messages).thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
+        return chatCompletion(messages, "DeepSeek-Coder-33B")
+            .thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
     }
 
-    /**
-     * 查找 Bug
-     */
     fun findBugs(code: String, language: String): CompletableFuture<String> {
         val messages = listOf(
-            AIMessage("system", "你是一个代码审查专家。请仔细检查代码中的潜在问题、bug、安全漏洞和性能问题。"),
-            AIMessage("user", "请审查以下 $language 代码，指出其中可能存在的问题：\n\n```$language\n$code\n```")
+            ChatMessage("system", "你是一个代码审查专家。请仔细检查代码中的潜在问题、bug、安全漏洞和性能问题。"),
+            ChatMessage("user", "请审查以下 $language 代码，指出其中可能存在的问题：\n\n```$language\n$code\n```")
         )
-        return chat(messages).thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
+        return chatCompletion(messages)
+            .thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
     }
 
-    /**
-     * 优化代码
-     */
     fun optimizeCode(code: String, language: String): CompletableFuture<String> {
         val messages = listOf(
-            AIMessage("system", "你是一个代码优化专家。请从性能、可读性和可维护性等方面优化代码。"),
-            AIMessage("user", "请优化以下 $language 代码：\n\n```$language\n$code\n```")
+            ChatMessage("system", "你是一个代码优化专家。请从性能、可读性和可维护性等方面优化代码。"),
+            ChatMessage("user", "请优化以下 $language 代码：\n\n```$language\n$code\n```")
         )
-        return chat(messages).thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
+        return chatCompletion(messages, "DeepSeek-Coder-33B")
+            .thenApply { it.choices.firstOrNull()?.message?.content ?: "" }
     }
 
+    // ==================== 内部方法 ====================
+
     /**
-     * 获取认证头
+     * 设置认证 Header
      */
-    private fun getAuthHeader(): String {
-        return when {
-            accessToken.isNotEmpty() -> "Bearer $accessToken"
-            apiKey.isNotEmpty() -> "Bearer $apiKey"
-            else -> throw IllegalStateException("No authentication credentials configured")
+    private fun setAuthHeader(connection: HttpURLConnection) {
+        if (authToken.isNotEmpty()) {
+            connection.setRequestProperty("Authorization", "Bearer $authToken")
         }
     }
 
     /**
-     * 检查是否已配置
+     * 带重试的 HTTP 请求
+     * 5xx 错误自动重试（最多 MAX_RETRIES 次），4xx 不重试
      */
-    fun isConfigured(): Boolean {
-        return apiBaseUrl.isNotEmpty() && (apiKey.isNotEmpty() || accessToken.isNotEmpty())
+    private fun executeRequestWithRetry(
+        endpoint: String,
+        body: String,
+        retries: Int = MAX_RETRIES
+    ): String {
+        var lastError: Exception? = null
+
+        for (attempt in 0..retries) {
+            var connection: HttpURLConnection? = null
+            try {
+                val url = URL("$baseUrl$endpoint")
+                connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    connectTimeout = CONNECT_TIMEOUT_MS
+                    readTimeout = REQUEST_TIMEOUT_MS
+                    setRequestProperty("Content-Type", "application/json")
+                    setAuthHeader(this)
+                }
+
+                // 发送请求体
+                connection.outputStream.use { os ->
+                    os.write(body.toByteArray(Charsets.UTF_8))
+                    os.flush()
+                }
+
+                val responseCode = connection.responseCode
+
+                when {
+                    responseCode == 200 || responseCode == 201 -> {
+                        return connection.inputStream.bufferedReader(Charsets.UTF_8).readText()
+                    }
+                    responseCode == 401 -> {
+                        notifyError("认证失败（401），请重新配置 Token")
+                        throw IllegalStateException("认证已过期，请重新登录")
+                    }
+                    responseCode == 429 -> {
+                        val retryAfter = connection.getHeaderField("Retry-After")?.toIntOrNull() ?: 5
+                        notifyWarning("请求过于频繁（429），请等待 ${retryAfter} 秒后重试")
+                        throw IllegalStateException("请求过于频繁，请等待 $retryAfter 秒后重试")
+                    }
+                    responseCode >= 500 && attempt < retries -> {
+                        // 5xx 错误：指数退避重试
+                        val delay = RETRY_BASE_DELAY_MS * (1L shl attempt) // 1s, 2s
+                        logger.warn("Server error $responseCode, retrying in ${delay}ms (attempt ${attempt + 1}/$retries)")
+                        Thread.sleep(delay)
+                        continue
+                    }
+                    else -> {
+                        val errorBody = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.readText() ?: "Unknown error"
+                        throw RuntimeException("HTTP $responseCode: $errorBody")
+                    }
+                }
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: IllegalStateException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+                logger.warn("Request failed (attempt ${attempt + 1}/$retries): ${e.message}")
+                if (attempt == retries) break
+            } finally {
+                connection?.disconnect()
+            }
+        }
+
+        throw lastError ?: RuntimeException("Unknown error")
     }
 
     /**
-     * 取消正在进行的请求
+     * 显示错误通知
+     */
+    private fun notifyError(message: String) {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("AI Assistant Notifications")
+                    .createNotification("AI Assistant 错误", message, NotificationType.ERROR)
+                    .notify(null)
+            } catch (e: Exception) {
+                logger.warn("Failed to show notification: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 显示警告通知
+     */
+    private fun notifyWarning(message: String) {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("AI Assistant Notifications")
+                    .createNotification("AI Assistant 警告", message, NotificationType.WARNING)
+                    .notify(null)
+            } catch (e: Exception) {
+                logger.warn("Failed to show notification: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 取消正在进行的请求（标记用）
      */
     fun cancelRequest() {
-        // 实现取消逻辑
+        // HttpURLConnection 不支持真正的取消，需在调用方使用 Future.cancel()
     }
 }

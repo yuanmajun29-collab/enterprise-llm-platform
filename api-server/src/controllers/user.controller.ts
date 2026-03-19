@@ -1,4 +1,4 @@
-import { query, update, queryOne, remove } from '../config/database';
+import { query, queryOne } from '../config/database';
 import { cacheDelete } from '../config/redis';
 
 /**
@@ -200,7 +200,7 @@ export async function setUserRole(adminUserId: string, targetUserId: string, isA
 /**
  * 管理员设置用户配额
  */
-export async function setUserQuota(adminUserId: string, targetUserId: string, quotaType: string, limits: any) {
+export async function setUserQuota(_adminUserId: string, targetUserId: string, quotaType: string, limits: any) {
   const { dailyLimit, hourlyLimit, monthlyLimit } = limits;
 
   const result = await queryOne(`
